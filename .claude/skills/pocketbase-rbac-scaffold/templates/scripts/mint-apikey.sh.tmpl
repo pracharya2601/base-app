@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Mint a SCOPED, revocable API key for a service client (e.g. the MCP server).
+# You log in with a superuser password ONCE here; the resulting pbk_... key is
+# what you store (as PB_API_KEY). The password is never kept in app config.
+#
+# The key gets only the scopes the MCP server needs — NOT admin, NOT keys:manage
+# — so a leaked key can't escalate or mint more keys. Revoke any time with:
+#   curl -X DELETE "$PB_URL/api/superadmin/apikeys/<id>" -H "Authorization: <admin-jwt>"
+#
+# Usage:
+#   PB_URL=http://localhost:8090 \
+#   PB_ADMIN_EMAIL=__ADMIN_EMAIL__ PB_ADMIN_PASSWORD=__ADMIN_PASSWORD__ \
+#   KEY_NAME=mcp-server ./scripts/mint-apikey.sh
+set -euo pipefail
+
+PB_URL="${PB_URL:-http://localhost:8090}"
+EMAIL="${PB_ADMIN_EMAIL:-__ADMIN_EMAIL__}"
+PASS="${PB_ADMIN_PASSWORD:-__ADMIN_PASSWORD__}"
+KEY_NAME="${KEY_NAME:-mcp-server}"
+# Control-plane scopes the MCP tools need (schema, settings, RBAC management).
+SCOPES='["schema:read","schema:write","records:write","settings:read","settings:write","roles:read","roles:write"]'
+# Data-plane role for the key's service account. "admin" => full record access;
+# pass ROLE_NAME=viewer (etc.) for a restricted operator key.
+ROLE_NAME="${ROLE_NAME:-admin}"
+
+# 1. Authenticate (password used only for this minting step).
+RESP=$(curl -s -X POST "$PB_URL/api/collections/_superusers/auth-with-password" \
+  -H "Content-Type: application/json" \
+  -d "{\"identity\":\"$EMAIL\",\"password\":\"$PASS\"}")
+ADMIN_TOKEN=$(echo "$RESP" | jq -r '.token')
+
+if [ "$ADMIN_TOKEN" = "null" ] || [ -z "$ADMIN_TOKEN" ]; then
+  echo "auth failed: $RESP" >&2
+  exit 1
+fi
+
+# 2. Resolve the data-plane role id (the key acts AS a service account with it).
+ROLE_ID=$(curl -s -G "$PB_URL/api/superadmin/roles" -H "Authorization: $ADMIN_TOKEN" \
+  | jq -r --arg n "$ROLE_NAME" '.roles[] | select(.name==$n) | .id')
+if [ -z "$ROLE_ID" ] || [ "$ROLE_ID" = "null" ]; then
+  echo "role '$ROLE_NAME' not found" >&2
+  exit 1
+fi
+
+# 3. Mint the key (superuser-only endpoint). Plaintext is returned ONCE.
+MINT=$(curl -s -X POST "$PB_URL/api/superadmin/apikeys" \
+  -H "Authorization: $ADMIN_TOKEN" -H "Content-Type: application/json" \
+  -d "{\"name\":\"$KEY_NAME\",\"scopes\":$SCOPES,\"roles\":[\"$ROLE_ID\"]}")
+KEY=$(echo "$MINT" | jq -r '.key')
+
+if [ "$KEY" = "null" ] || [ -z "$KEY" ]; then
+  echo "mint failed: $MINT" >&2
+  exit 1
+fi
+
+# 4. Emit the key (store it as PB_API_KEY — it cannot be retrieved again).
+echo "# api key '$KEY_NAME' minted (id: $(echo "$MINT" | jq -r '.id')); scopes: $(echo "$MINT" | jq -rc '.scopes'); role: $ROLE_NAME" >&2
+echo "$KEY"

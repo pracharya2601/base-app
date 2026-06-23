@@ -1,0 +1,14 @@
+# Litestream v0.5 config. Env vars are expanded automatically.
+# Replicates PocketBase's main SQLite db continuously to an S3 target.
+dbs:
+  - path: /pb/pb_data/data.db
+    replica:
+      type: s3
+      bucket: ${LITESTREAM_BUCKET}
+      path: data.db
+      endpoint: ${LITESTREAM_ENDPOINT}
+      region: ${LITESTREAM_REGION}
+      access-key-id: ${LITESTREAM_ACCESS_KEY_ID}
+      secret-access-key: ${LITESTREAM_SECRET_ACCESS_KEY}
+      # true for S3-compatible stores (R2/B2/MinIO), false for real AWS S3.
+      force-path-style: ${LITESTREAM_FORCE_PATH_STYLE}

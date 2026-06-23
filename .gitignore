@@ -1,0 +1,21 @@
+# PocketBase runtime data (DB + uploads) — never commit
+pb_data/
+
+# Compiled MCP binary
+mcp/pb-mcp
+
+# Secrets / tokens — keep these OUT of version control
+*.token
+.env
+.env.*
+# ...but DO commit the template
+!.env.example
+
+# Local MCP config holds a real API key — commit .mcp.json.example instead
+.mcp.json
+
+# Claude Desktop config backups created during setup
+**/claude_desktop_config.json.bak.*
+
+# OS noise
+.DS_Store

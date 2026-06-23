@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pocketbase-superadmin": {
+      "command": "/absolute/path/to/base-app/mcp/pb-mcp",
+      "env": {
+        "PB_URL": "http://localhost:8090",
+        "PB_API_KEY": "pbk_REPLACE_ME"
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+services:
+  pocketbase:
+    build:
+      context: .
+      args:
+        LITESTREAM_VERSION: 0.5.12
+    container_name: pocketbase
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data
+    # All secrets + the Litestream S3 target come from .env (gitignored).
+    # Copy .env.example -> .env and fill it in. With no .env (or an empty
+    # LITESTREAM_BUCKET) PocketBase boots WITHOUT replication — handy for
+    # local dev. In production, inject these same vars from a secret manager
+    # instead of shipping a .env file.
+    env_file:
+      - path: .env
+        required: false
+    restart: unless-stopped
