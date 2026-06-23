@@ -264,6 +264,16 @@ Over a gate → **429** with a descriptive message. Config via env (read at star
 but does NOT cap tokens — set `AI_TOKEN_QUOTA_PER_DAY` on Render to enable the
 cost ceiling.
 
+## Verified (real OpenAI call, 2026-06-23)
+
+Text `generate` + `stream` and image generation all confirmed end-to-end against
+OpenAI (real responses, real token usage, image stored + served via its preview
+URL). One **goai v0.8.5 gotcha** found: for OpenAI images use **`gpt-image-1`**,
+not `dall-e-3` — goai sends a `response_format` param for "older" image models,
+which OpenAI's current `/v1/images/generations` rejects
+(`Unknown parameter: 'response_format'` → 502). `gpt-image-1`/`-mini`/`1.5` skip
+it and work.
+
 ## Capability ladder
 
 What this setup can extract, cheap+safe → complex. Each rung ships independently.
