@@ -230,6 +230,24 @@ func main() {
 		registerPermissionSyncHooks(app)
 		backfillRBAC(app)
 
+		// AI proxy / orchestrator (rungs 0-2, see docs/AI-PROXY.md): ensure the
+		// _aiProviders (encrypted keys) + _aiUsage (metering) system collections,
+		// then wire /api/ai/{provider}/generate + /stream (JWT auth) and the
+		// superuser provider-management routes.
+		if err := ensureAIProvidersCollection(app); err != nil {
+			return err
+		}
+		if err := ensureAIUsageCollection(app); err != nil {
+			return err
+		}
+		if err := ensureAIImagesCollection(app); err != nil {
+			return err
+		}
+		registerAIRoutes(se, app)
+		registerAIImageRoutes(se, app)
+		registerAIUI(se)    // GET /admin/ai — standalone provider-keys UI (back-compat)
+		registerAdminUI(se) // GET /admin — unified console (API keys + AI providers + test)
+
 		// Self-describing field-type catalog. PUBLIC (pure capability metadata):
 		// the frontend, the MCP server, and humans all read this to know what
 		// the provision endpoint can build. This is the shared contract.

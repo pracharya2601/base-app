@@ -17,8 +17,8 @@ PB_URL="${PB_URL:-http://localhost:8090}"
 EMAIL="${PB_ADMIN_EMAIL:-admin@example.com}"
 PASS="${PB_ADMIN_PASSWORD:-SuperSecret123}"
 KEY_NAME="${KEY_NAME:-mcp-server}"
-# Control-plane scopes the MCP tools need (schema, settings, RBAC management).
-SCOPES='["schema:read","schema:write","records:write","settings:read","settings:write","roles:read","roles:write"]'
+# Control-plane scopes the MCP tools need (schema, settings, RBAC management, AI proxy).
+SCOPES='["schema:read","schema:write","records:write","settings:read","settings:write","roles:read","roles:write","ai:use"]'
 # Data-plane role for the key's service account. "admin" => full record access;
 # pass ROLE_NAME=viewer (etc.) for a restricted operator key.
 ROLE_NAME="${ROLE_NAME:-admin}"

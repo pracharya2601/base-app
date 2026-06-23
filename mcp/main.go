@@ -324,6 +324,102 @@ func main() {
 			return statusText(status, b), nil
 		})
 
+	// ---- AI proxy (the server holds provider keys; the agent never sees them) ----
+
+	// 10. Discover AI providers (text + image + which are usable right now).
+	s.AddTool(
+		mcp.NewTool("ai_list_providers",
+			mcp.WithDescription("List the AI proxy's providers so you can call them: the full TEXT "+
+				"provider allowlist, the IMAGE-capable providers, and which providers are USABLE right "+
+				"now (enabled AND a key configured). The proxy lets you generate text/images WITHOUT "+
+				"holding any provider API key — the server keeps the key and you call it by provider "+
+				"name. Call this FIRST to pick a valid provider. If nothing is usable, a human must add "+
+				"a provider key in the /admin console (AI Providers tab); tell the user to do that.")),
+		func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			cat, _, e1 := pb.request("GET", "/api/ai/catalog", nil)
+			img, _, e2 := pb.request("GET", "/api/ai/image-catalog", nil)
+			usable, _, e3 := pb.request("GET", "/api/ai/providers", nil)
+			if e1 != nil || e2 != nil || e3 != nil {
+				return mcp.NewToolResultError(fmt.Sprintf("%v / %v / %v", e1, e2, e3)), nil
+			}
+			out := "TEXT providers (full allowlist):\n" + string(cat) +
+				"\n\nIMAGE-capable providers:\n" + string(img) +
+				"\n\nUSABLE now (enabled + key set):\n" + string(usable)
+			return mcp.NewToolResultText(out), nil
+		})
+
+	// 11. Generate text via the proxy.
+	s.AddTool(
+		mcp.NewTool("ai_generate_text",
+			mcp.WithDescription("Generate text through the AI proxy. The server injects the provider's "+
+				"API key (you never see it); returns the model's text and token usage. Use "+
+				"ai_list_providers first to choose a usable provider. 'model' is optional when the "+
+				"provider has a default model configured. On a 502 'provider error', the upstream "+
+				"provider rejected the call (e.g. bad model id) — surface the detail."),
+			mcp.WithString("provider", mcp.Required(), mcp.Description("Provider name, e.g. \"anthropic\", \"openai\", \"groq\", \"google\".")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("The prompt / instruction to send.")),
+			mcp.WithString("model", mcp.Description("Model id (optional; uses the provider's defaultModel if omitted).")),
+			mcp.WithString("system", mcp.Description("Optional system prompt.")),
+			mcp.WithNumber("maxTokens", mcp.Description("Optional max output tokens."))),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			provider := req.GetString("provider", "")
+			if provider == "" {
+				return mcp.NewToolResultError("'provider' is required"), nil
+			}
+			body := map[string]any{"prompt": req.GetString("prompt", "")}
+			if m := req.GetString("model", ""); m != "" {
+				body["model"] = m
+			}
+			if sys := req.GetString("system", ""); sys != "" {
+				body["system"] = sys
+			}
+			if mt := req.GetInt("maxTokens", 0); mt > 0 {
+				body["maxTokens"] = mt
+			}
+			payload, _ := json.Marshal(body)
+			b, status, err := pb.request("POST", "/api/ai/"+provider+"/generate", payload)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return statusText(status, b), nil
+		})
+
+	// 12. Generate image(s) via the proxy — stored server-side, returns preview URLs.
+	s.AddTool(
+		mcp.NewTool("ai_generate_image",
+			mcp.WithDescription("Generate image(s) through the AI proxy. Only image-capable providers "+
+				"work (see ai_list_providers IMAGE list: openai, google, vertex, azure). Each image is "+
+				"stored server-side (to S3/R2 when file storage is enabled) and the result contains a "+
+				"PREVIEW URL per image (a /api/files/... link you can show or embed). 'model' is "+
+				"optional if the provider has a default."),
+			mcp.WithString("provider", mcp.Required(), mcp.Description("Image provider, e.g. \"openai\", \"google\".")),
+			mcp.WithString("prompt", mcp.Required(), mcp.Description("Text description of the image to generate.")),
+			mcp.WithString("model", mcp.Description("Image model id (optional; e.g. \"dall-e-3\", \"gpt-image-1\").")),
+			mcp.WithString("size", mcp.Description("Optional size, e.g. \"1024x1024\".")),
+			mcp.WithNumber("count", mcp.Description("Optional number of images (default 1)."))),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			provider := req.GetString("provider", "")
+			if provider == "" {
+				return mcp.NewToolResultError("'provider' is required"), nil
+			}
+			body := map[string]any{"prompt": req.GetString("prompt", "")}
+			if m := req.GetString("model", ""); m != "" {
+				body["model"] = m
+			}
+			if sz := req.GetString("size", ""); sz != "" {
+				body["size"] = sz
+			}
+			if c := req.GetInt("count", 0); c > 0 {
+				body["count"] = c
+			}
+			payload, _ := json.Marshal(body)
+			b, status, err := pb.request("POST", "/api/ai/"+provider+"/image", payload)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return statusText(status, b), nil
+		})
+
 	if err := server.ServeStdio(s); err != nil {
 		fmt.Fprintf(os.Stderr, "pb-mcp error: %v\n", err)
 		os.Exit(1)

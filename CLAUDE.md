@@ -97,7 +97,8 @@ Plus all standard PocketBase endpoints (`/api/collections`, `/api/collections/{c
 
 ### API-key scopes
 `admin` (all), `schema:read`, `schema:write`, `records:read`, `records:write`,
-`settings:read`, `settings:write`, `keys:manage`, `roles:read`, `roles:write`. Edit the `knownScopes` map +
+`settings:read`, `settings:write`, `keys:manage`, `roles:read`, `roles:write`,
+`ai:use` (the AI proxy — `/api/ai/*`). Edit the `knownScopes` map +
 `requiredScope()` in `apikeys.go` to add more (no schema migration needed).
 
 API-key scopes are a **machine-client** gate (coarse, per-route-family). They are
@@ -163,16 +164,20 @@ and rule patterns (permission-based, role-name, per-record ownership).
 
 ## MCP server (`mcp/pb-mcp`)
 
-9 tools: `list_field_types`, `list_collections`, `provision_schema`,
-`create_record`, `get_settings`, `update_settings`, plus the **agentic RBAC**
-tools `list_roles`, `manage_role`, `assign_user_roles`. The RBAC write tools'
+12 tools: `list_field_types`, `list_collections`, `provision_schema`,
+`create_record`, `get_settings`, `update_settings`, the **agentic RBAC** tools
+`list_roles`, `manage_role`, `assign_user_roles`, and the **AI proxy** tools
+`ai_list_providers`, `ai_generate_text`, `ai_generate_image` (so an AI coding
+agent can discover + drive the proxy without ever holding a provider key — see
+`docs/AI-PROXY.md`). The RBAC write tools'
 descriptions tell the agent this is a **policy decision** and to **ASK THE USER**
 before granting permissions or assigning powerful roles — the MCP doesn't invent
 access policy. Auth via env, in precedence order — `PB_API_KEY` (**preferred**:
 scoped + revocable, mint with `scripts/mint-apikey.sh`), then `PB_TOKEN`, then
 `PB_EMAIL`/`PB_PASSWORD` (auto-renew on 401). The MCP key needs `roles:read
-roles:write` (+ `schema:*`, `settings:*`, `records:write`) — not
-`admin`/`keys:manage`. Wired into Claude
+roles:write ai:use` (+ `schema:*`, `settings:*`, `records:write`) — not
+`admin`/`keys:manage`. (`ai:use` gates `/api/ai/*`; a key minted before this scope
+existed must be re-minted to use the AI tools.) Wired into Claude
 Desktop at `~/Library/Application Support/Claude/claude_desktop_config.json`
 (server name `pocketbase-superadmin`, alongside an existing `sentinel` server).
 Restart Claude Desktop after rebuilding the binary.

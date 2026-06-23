@@ -37,6 +37,7 @@ var knownScopes = map[string]string{
 	"keys:manage":   "Mint, list, and revoke API keys.",
 	"roles:read":    "Read roles and their permissions.",
 	"roles:write":   "Create/modify roles, grant permissions, assign user roles.",
+	"ai:use":        "Use the AI proxy: generate text/images via /api/ai/* and read the provider catalog.",
 }
 
 func sha256hex(s string) string {
@@ -56,6 +57,8 @@ func newRawKey() (string, error) {
 // Order matters: record paths are checked before the generic collections path.
 func requiredScope(method, path string) string {
 	switch {
+	case strings.HasPrefix(path, "/api/ai/"):
+		return "ai:use" // text/image generation + provider catalog (the AI proxy)
 	case strings.HasPrefix(path, "/api/superadmin/apikeys"):
 		return "keys:manage"
 	case strings.HasPrefix(path, "/api/superadmin/provision"):

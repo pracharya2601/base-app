@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Admin — base-app</title>
+<style>
+  /* Palette mirrors PocketBase's admin UI tokens so this console feels native
+     next to /_/. Light by default; dark via media query. */
+  :root {
+    --baseFont:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --monoFont:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --pageBg:#f8f9fa; --surface:#fff;
+    --alt1:#f8f9fa; --alt2:#e4e8ec; --alt3:#dce0e5; --alt4:#d3d9df;
+    --txt:#25272d; --txtHint:#687278; --txtDisabled:#a2a9ae;
+    --primary:#25272d; --primaryTxt:#fff;
+    --accent:#1055c9; --success:#22a96d; --warning:#e57534; --danger:#c33751;
+    --radius:5px; --lgRadius:12px; --inputPad:13px;
+    --shadow:0px 8px 5px -5px rgba(34,36,36,0.1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --pageBg:#161616; --surface:#1c1c1c;
+      --alt1:#1e1e1e; --alt2:#2a2a2a; --alt3:#323232; --alt4:#3a3a3a;
+      --txt:#ebebeb; --txtHint:#9aa0a6; --txtDisabled:#6f6f6f;
+      --primary:#ebebeb; --primaryTxt:#1c1c1c;
+      --accent:#4273bd; --success:#27865d; --warning:#cf4e17; --danger:#bb303e;
+      --shadow:0px 8px 5px -5px rgba(0,0,0,0.3);
+    }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--pageBg); color:var(--txt); font-family:var(--baseFont); font-size:14px; line-height:22px; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 4px; }
+  .sub { color:var(--txtHint); margin:0 0 24px; }
+  .card { background:var(--surface); border:1px solid var(--alt2); border-radius:var(--lgRadius); padding:24px; margin-bottom:20px; box-shadow:var(--shadow); }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--txtHint); font-weight:600; margin:0 0 16px; }
+  label { display:block; font-size:13px; color:var(--txtHint); margin:0 0 6px; }
+  input[type=text], input[type=email], input[type=password], input[type=number], select, textarea {
+    width:100%; padding:0 var(--inputPad); height:45px; background:var(--surface); border:1px solid var(--alt4);
+    border-radius:var(--radius); color:var(--txt); font:inherit; }
+  textarea { height:auto; min-height:80px; padding:12px var(--inputPad); resize:vertical; }
+  input:focus, select:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 80%); }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  .field { margin-bottom:16px; }
+  button { padding:0 18px; height:45px; border:0; border-radius:var(--radius); background:var(--primary); color:var(--primaryTxt); font:inherit; font-weight:600; cursor:pointer; transition:filter .15s; }
+  button:hover { filter:brightness(1.15); }
+  button.ghost { background:transparent; border:1px solid var(--alt4); color:var(--txt); font-weight:500; height:35px; padding:0 14px; }
+  button.danger { background:transparent; border:1px solid var(--danger); color:var(--danger); height:30px; padding:0 12px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .checks { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+  .check { display:flex; gap:9px; align-items:flex-start; padding:10px 12px; background:var(--alt1); border:1px solid var(--alt2); border-radius:var(--radius); cursor:pointer; transition:border-color .15s; }
+  .check:hover { border-color:var(--alt4); }
+  .check input { margin-top:3px; accent-color:var(--accent); width:auto; height:auto; }
+  .check .desc { color:var(--txtHint); font-size:13px; }
+  .check code { color:var(--txt); }
+  .hidden { display:none !important; }
+  .msg { padding:11px 13px; border-radius:var(--radius); margin-bottom:14px; font-size:13px; }
+  .msg.err { background:color-mix(in srgb, var(--danger), transparent 88%); border:1px solid var(--danger); color:var(--danger); }
+  .msg.ok  { background:color-mix(in srgb, var(--success), transparent 88%); border:1px solid var(--success); color:var(--success); }
+  .keyout { background:color-mix(in srgb, var(--warning), transparent 92%); border:1px solid var(--warning); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
+  .keyout code { display:block; word-break:break-all; font-size:13px; color:var(--txt); margin:10px 0; font-family:var(--monoFont); }
+  .keyout .warn { color:var(--warning); font-size:13px; margin:8px 0 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--alt2); vertical-align:top; }
+  th { color:var(--txtHint); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+  .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; background:var(--alt1); border:1px solid var(--alt3); color:var(--txtHint); }
+  .pill.revoked { color:var(--danger); border-color:var(--danger); }
+  .pill.yes { color:var(--success); border-color:var(--success); }
+  .pill.no  { color:var(--danger); border-color:var(--danger); }
+  .topbar { display:flex; justify-content:space-between; align-items:center; }
+  .mono { font-family:var(--monoFont); }
+  pre { background:var(--alt1); border:1px solid var(--alt2); border-radius:var(--radius); padding:14px; overflow:auto; font-size:13px; line-height:1.5; max-height:300px; white-space:pre-wrap; font-family:var(--monoFont); margin:14px 0 0; }
+  .muted { color:var(--txtHint); }
+
+  /* ---- layout: sidebar + content ---- */
+  .layout { display:flex; min-height:100vh; }
+  .sidebar { width:236px; flex-shrink:0; background:var(--surface); border-right:1px solid var(--alt2); padding:22px 16px; display:flex; flex-direction:column; position:sticky; top:0; height:100vh; }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:600; font-size:16px; margin:4px 6px 22px; }
+  .brand .dot { width:10px; height:10px; border-radius:50%; background:var(--accent); }
+  .nav { display:flex; flex-direction:column; gap:4px; }
+  .nav a { display:flex; align-items:center; gap:11px; padding:10px 12px; border-radius:var(--radius); color:var(--txt); text-decoration:none; font-weight:500; cursor:pointer; user-select:none; }
+  .nav a:hover { background:var(--alt1); }
+  .nav a.active { background:var(--alt2); }
+  .nav a .ico { width:18px; text-align:center; opacity:.85; }
+  .sidefoot { margin-top:auto; padding:12px 8px 4px; border-top:1px solid var(--alt2); font-size:13px; color:var(--txtHint); }
+  .sidefoot .who { word-break:break-all; margin-bottom:10px; }
+  .content { flex:1; min-width:0; padding:36px 40px 80px; }
+  .content-inner { max-width:880px; }
+  .section { display:none; }
+  .section.active { display:block; }
+  .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; margin-top:10px; }
+  .gallery figure { margin:0; border:1px solid var(--alt2); border-radius:var(--radius); overflow:hidden; background:var(--alt1); }
+  .gallery img { width:100%; height:160px; object-fit:cover; display:block; background:var(--alt2); }
+  .gallery figcaption { padding:7px 9px; font-size:11px; color:var(--txtHint); word-break:break-word; line-height:1.4; }
+
+  /* ---- login overlay ---- */
+  .overlay { position:fixed; inset:0; background:var(--pageBg); display:flex; align-items:center; justify-content:center; padding:20px; z-index:10; }
+  .overlay .card { width:100%; max-width:420px; margin:0; }
+
+  @media (max-width:720px) {
+    .layout { flex-direction:column; }
+    .sidebar { width:100%; height:auto; position:static; flex-direction:row; align-items:center; gap:12px; padding:12px 16px; }
+    .brand { margin:0 12px 0 0; }
+    .nav { flex-direction:row; }
+    .sidefoot { margin:0 0 0 auto; border:0; padding:0; }
+    .sidefoot .who { display:none; }
+    .content { padding:24px 18px 60px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- LOGIN OVERLAY -->
+<div class="overlay" id="loginOverlay">
+  <div class="card">
+    <h2>base-app admin</h2>
+    <div id="loginMsg"></div>
+    <div class="field"><label>Email</label><input type="email" id="email" value="admin@example.com" autocomplete="username" /></div>
+    <div class="field"><label>Password</label><input type="password" id="password" autocomplete="current-password" /></div>
+    <button id="loginBtn" style="width:100%">Log in</button>
+  </div>
+</div>
+
+<!-- APP -->
+<div class="layout hidden" id="app">
+  <aside class="sidebar">
+    <div class="brand"><span class="dot"></span> base-app</div>
+    <nav class="nav">
+      <a data-view="providers"><span class="ico">✦</span> AI Providers</a>
+      <a data-view="images"><span class="ico">🖼</span> Images</a>
+      <a data-view="keys"><span class="ico">⚿</span> API Keys</a>
+    </nav>
+    <div class="sidefoot">
+      <div class="who" id="whoami">—</div>
+      <button class="ghost" id="logoutBtn" style="width:100%">Log out</button>
+    </div>
+  </aside>
+
+  <main class="content"><div class="content-inner">
+
+    <!-- ============ AI PROVIDERS ============ -->
+    <section class="section" id="view-providers">
+      <h1>AI Providers</h1>
+      <p class="sub">Configure provider keys for the AI proxy. Keys are encrypted at rest on save and never returned.</p>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Configured providers</h2><button class="ghost" id="provRefresh">Refresh</button></div>
+        <div id="provListMsg" style="margin-top:12px"></div>
+        <table style="margin-top:8px"><thead>
+          <tr><th>Provider</th><th>Enabled</th><th>Has key</th><th>Default model</th><th>Base URL</th></tr>
+        </thead><tbody id="provBody"></tbody></table>
+      </div>
+
+      <div class="card">
+        <h2>Add / update a key</h2>
+        <div id="provSaveMsg"></div>
+        <div class="row">
+          <div class="field"><label>Provider</label>
+            <select id="pProvider"></select>
+          </div>
+          <div class="field"><label>Default model</label><input type="text" id="pDefaultModel" placeholder="e.g. claude-sonnet-4-6 / gpt-4o" /></div>
+        </div>
+        <div class="field"><label>API key (paste raw — encrypted on save; leave blank to keep existing)</label>
+          <input type="password" id="pApiKey" placeholder="sk-ant-… / sk-…" /></div>
+        <div class="field"><label>Base URL (optional — OpenAI-compatible / self-hosted)</label>
+          <input type="text" id="pBaseUrl" placeholder="leave empty for the default endpoint" /></div>
+        <label class="check" style="max-width:220px"><input type="checkbox" id="pEnabled" checked /> <span>Enabled</span></label>
+        <div style="margin-top:16px"><button id="provSaveBtn">Save provider</button></div>
+      </div>
+
+      <div class="card">
+        <h2>Test a call</h2>
+        <div class="row">
+          <div class="field"><label>Provider</label>
+            <select id="tProvider"></select>
+          </div>
+          <div class="field"><label>Model (optional — uses default)</label><input type="text" id="tModel" placeholder="" /></div>
+        </div>
+        <div class="field"><label>Prompt</label><textarea id="tPrompt">Say hello in one short sentence.</textarea></div>
+        <div class="row" style="gap:10px">
+          <button id="genBtn" style="flex:0">Generate</button>
+          <button id="streamBtn" class="ghost" style="height:45px; flex:0">Stream</button>
+        </div>
+        <div id="testMsg" style="margin-top:14px"></div>
+        <pre id="testOut" class="hidden"></pre>
+      </div>
+    </section>
+
+    <!-- ============ IMAGES ============ -->
+    <section class="section" id="view-images">
+      <h1>Image Generation</h1>
+      <p class="sub">Generate images via the proxy. Each is stored as a file (→ S3/R2 when file storage is enabled) and gets a preview URL.</p>
+
+      <div class="card">
+        <h2>Generate</h2>
+        <div id="imgGenMsg"></div>
+        <div class="row">
+          <div class="field"><label>Provider</label><select id="iProvider"></select></div>
+          <div class="field"><label>Model (optional — uses default)</label><input type="text" id="iModel" placeholder="e.g. dall-e-3 / gpt-image-1" /></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Size (optional)</label><input type="text" id="iSize" placeholder="e.g. 1024x1024" /></div>
+          <div class="field"><label>Count (optional)</label><input type="number" id="iCount" min="1" placeholder="1" /></div>
+        </div>
+        <div class="field"><label>Prompt</label><textarea id="iPrompt">A serene mountain lake at sunrise, photorealistic.</textarea></div>
+        <button id="imgGenBtn">Generate image</button>
+      </div>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Recent images</h2><button class="ghost" id="imgRefresh">Refresh</button></div>
+        <div id="imgGalleryMsg" style="margin-top:12px"></div>
+        <div id="imgGallery" class="gallery"></div>
+      </div>
+    </section>
+
+    <!-- ============ API KEYS ============ -->
+    <section class="section" id="view-keys">
+      <h1>API Keys</h1>
+      <p class="sub">Mint scoped, roled, revocable keys. Each key creates a backing service account automatically.</p>
+
+      <div class="card">
+        <h2>Mint a new key</h2>
+        <div id="mintMsg"></div>
+        <div id="keyResult" class="hidden"></div>
+        <div class="row">
+          <div class="field"><label>Name (required)</label><input type="text" id="keyName" placeholder="e.g. mcp-server" /></div>
+          <div class="field"><label>Expires in days (0 / blank = never)</label><input type="number" id="expiresInDays" min="0" placeholder="0" /></div>
+        </div>
+        <div class="field">
+          <label>Control-plane scopes — gate schema/settings/key routes</label>
+          <div class="checks" id="scopeChecks"></div>
+        </div>
+        <div class="field">
+          <label>Data-plane roles — what records the key can touch (via its service account)</label>
+          <div class="checks" id="roleChecks"></div>
+        </div>
+        <button id="mintBtn">Generate key</button>
+      </div>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Existing keys</h2><button class="ghost" id="keysRefresh">Refresh</button></div>
+        <div id="listMsg" style="margin-top:12px"></div>
+        <table style="margin-top:8px"><thead>
+          <tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Roles</th><th>Status</th><th></th></tr>
+        </thead><tbody id="keysBody"></tbody></table>
+      </div>
+    </section>
+
+  </div></main>
+</div>
+
+<script>
+(function () {
+  const API = ""; // same-origin
+  let token = sessionStorage.getItem("pb_admin_token") || "";
+
+  const $ = (id) => document.getElementById(id);
+  const show = (el) => el.classList.remove("hidden");
+  const hide = (el) => el.classList.add("hidden");
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+  const msg = (el, text, kind) => { el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : ""; };
+  const yn  = (v) => `<span class="pill ${v?'yes':'no'}">${v?'yes':'no'}</span>`;
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    if (token) headers["Authorization"] = token;
+    const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || (body.data && JSON.stringify(body.data)) || ("HTTP " + res.status));
+    return body;
+  }
+
+  // ---------- auth ----------
+  async function login() {
+    msg($("loginMsg"), "", ""); $("loginBtn").disabled = true;
+    try {
+      const r = await api("/api/collections/_superusers/auth-with-password", {
+        method: "POST",
+        body: JSON.stringify({ identity: $("email").value.trim(), password: $("password").value }),
+      });
+      token = r.token;
+      sessionStorage.setItem("pb_admin_token", token);
+      await enterApp();
+    } catch (e) { msg($("loginMsg"), "Login failed: " + e.message, "err"); }
+    finally { $("loginBtn").disabled = false; }
+  }
+  function logout() {
+    token = "";
+    sessionStorage.removeItem("pb_admin_token");
+    hide($("app")); show($("loginOverlay"));
+  }
+  async function enterApp() {
+    let me = {};
+    try { me = await api("/api/collections/_superusers/auth-refresh", { method: "POST" }); } catch (e) { return logout(); }
+    $("whoami").textContent = (me.record && me.record.email) || "superuser";
+    hide($("loginOverlay")); show($("app"));
+    route();
+    // load both sections' data up front
+    await loadCatalog();
+    loadProviders();
+    loadImageCatalog();
+    Promise.all([loadScopes(), loadRoles()]).then(loadKeys);
+  }
+
+  // ---------- sidebar routing ----------
+  function route() {
+    const view = (location.hash || "#providers").replace("#", "");
+    const valid = ["providers", "images", "keys"].includes(view) ? view : "providers";
+    document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
+    $("view-" + valid).classList.add("active");
+    document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === valid));
+    if (valid === "images") loadImages();
+  }
+  document.querySelectorAll(".nav a").forEach((a) => a.addEventListener("click", () => { location.hash = a.dataset.view; }));
+  window.addEventListener("hashchange", route);
+
+  // ================= AI PROVIDERS =================
+  let KNOWN = []; // full provider allowlist, fetched from /api/ai/catalog
+  async function loadCatalog() {
+    try {
+      const { providers } = await api("/api/ai/catalog");
+      providers.sort((a, b) => a.provider.localeCompare(b.provider));
+      KNOWN = providers.map((p) => p.provider);
+      const opts = providers.map((p) => `<option value="${esc(p.provider)}" title="${esc(p.description || "")}">${esc(p.provider)}</option>`).join("");
+      $("pProvider").innerHTML = opts;
+      $("tProvider").innerHTML = opts;
+    } catch (e) { /* dropdowns stay empty; table still renders from records */ }
+  }
+  async function loadProviders() {
+    msg($("provListMsg"), "", "");
+    try {
+      const d = await api("/api/collections/_aiProviders/records?perPage=200");
+      const byName = {}; d.items.forEach((r) => { byName[r.provider] = r; });
+      const names = Array.from(new Set([...KNOWN, ...Object.keys(byName)])).sort();
+      const dash = '<span class="muted">—</span>';
+      $("provBody").innerHTML = names.map((name) => {
+        const r = byName[name];
+        return `<tr><td><b>${esc(name)}</b></td>
+          <td>${yn(!!(r && r.enabled))}</td><td>${yn(!!(r && r.apiKeyEnc))}</td>
+          <td>${(r && r.defaultModel) ? esc(r.defaultModel) : dash}</td>
+          <td>${(r && r.baseUrl) ? esc(r.baseUrl) : dash}</td></tr>`;
+      }).join("");
+    } catch (e) { msg($("provListMsg"), "Failed to load providers: " + e.message, "err"); }
+  }
+
+  async function saveProvider() {
+    msg($("provSaveMsg"), "", ""); $("provSaveBtn").disabled = true;
+    try {
+      const provider = $("pProvider").value;
+      const payload = {
+        provider,
+        enabled: $("pEnabled").checked,
+        defaultModel: $("pDefaultModel").value.trim(),
+        baseUrl: $("pBaseUrl").value.trim(),
+      };
+      const key = $("pApiKey").value.trim();
+      if (key) payload.apiKeyEnc = key; // raw in -> save-hook encrypts
+      const existing = await api(`/api/collections/_aiProviders/records?filter=(provider='${encodeURIComponent(provider)}')`);
+      let rec, created;
+      if (existing.items.length) {
+        rec = await api(`/api/collections/_aiProviders/records/${existing.items[0].id}`, { method: "PATCH", body: JSON.stringify(payload) }); created = false;
+      } else {
+        rec = await api(`/api/collections/_aiProviders/records`, { method: "POST", body: JSON.stringify(payload) }); created = true;
+      }
+      msg($("provSaveMsg"), `Saved ${rec.provider} (${created?'created':'updated'}) — has key: ${!!rec.apiKeyEnc}`, "ok");
+      $("pApiKey").value = "";
+      loadProviders();
+    } catch (e) { msg($("provSaveMsg"), "Save failed: " + e.message, "err"); }
+    finally { $("provSaveBtn").disabled = false; }
+  }
+
+  function testBody() {
+    const body = { prompt: $("tPrompt").value };
+    if ($("tModel").value.trim()) body.model = $("tModel").value.trim();
+    return body;
+  }
+  async function generate() {
+    $("genBtn").disabled = $("streamBtn").disabled = true;
+    msg($("testMsg"), "Calling…", "ok"); hide($("testOut"));
+    try {
+      const d = await api(`/api/ai/${$("tProvider").value}/generate`, { method: "POST", body: JSON.stringify(testBody()) });
+      msg($("testMsg"), `OK — ${d.usage.totalTokens} tokens (${d.usage.promptTokens} in / ${d.usage.completionTokens} out)`, "ok");
+      $("testOut").textContent = d.text; show($("testOut"));
+    } catch (e) { msg($("testMsg"), "Error: " + e.message, "err"); }
+    finally { $("genBtn").disabled = $("streamBtn").disabled = false; }
+  }
+  async function streamCall() {
+    $("genBtn").disabled = $("streamBtn").disabled = true;
+    msg($("testMsg"), "Streaming…", "ok"); $("testOut").textContent = ""; show($("testOut"));
+    try {
+      const res = await fetch(`${API}/api/ai/${$("tProvider").value}/stream`, {
+        method: "POST", headers: { "Content-Type": "application/json", "Authorization": token }, body: JSON.stringify(testBody()),
+      });
+      if (!res.ok) { throw new Error((await res.text()) || ("HTTP " + res.status)); }
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+      while (true) {
+        const { done, value } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const frames = buf.split("\n\n"); buf = frames.pop();
+        for (const f of frames) {
+          const line = f.split("\n").find((l) => l.startsWith("data:")); if (!line) continue;
+          const evt = JSON.parse(line.slice(5).trim());
+          if (evt.delta) $("testOut").textContent += evt.delta;
+          else if (evt.done) msg($("testMsg"), `Done — ${evt.usage.totalTokens} tokens`, "ok");
+          else if (evt.error) msg($("testMsg"), "Stream error: " + evt.error, "err");
+        }
+      }
+    } catch (e) { msg($("testMsg"), "Error: " + e.message, "err"); }
+    finally { $("genBtn").disabled = $("streamBtn").disabled = false; }
+  }
+
+  // ================= IMAGES =================
+  async function loadImageCatalog() {
+    try {
+      const { providers } = await api("/api/ai/image-catalog");
+      providers.sort((a, b) => a.provider.localeCompare(b.provider));
+      $("iProvider").innerHTML = providers.map((p) => `<option value="${esc(p.provider)}" title="${esc(p.description || "")}">${esc(p.provider)}</option>`).join("");
+    } catch (e) { /* leave empty */ }
+  }
+  async function generateImage() {
+    msg($("imgGenMsg"), "Generating… (can take 10–30s)", "ok"); $("imgGenBtn").disabled = true;
+    try {
+      const body = { prompt: $("iPrompt").value };
+      if ($("iModel").value.trim()) body.model = $("iModel").value.trim();
+      if ($("iSize").value.trim()) body.size = $("iSize").value.trim();
+      const c = parseInt($("iCount").value, 10); if (!isNaN(c) && c > 0) body.count = c;
+      const d = await api(`/api/ai/${$("iProvider").value}/image`, { method: "POST", body: JSON.stringify(body) });
+      msg($("imgGenMsg"), `Generated ${d.count} image(s).`, "ok");
+      loadImages();
+    } catch (e) { msg($("imgGenMsg"), "Error: " + e.message, "err"); }
+    finally { $("imgGenBtn").disabled = false; }
+  }
+  async function loadImages() {
+    msg($("imgGalleryMsg"), "", "");
+    try {
+      const d = await api("/api/collections/_aiImages/records?perPage=24&sort=-created");
+      if (!d.items.length) { $("imgGallery").innerHTML = '<span class="desc">No images yet.</span>'; return; }
+      $("imgGallery").innerHTML = d.items.map((r) => {
+        const url = `${location.origin}/api/files/_aiImages/${r.id}/${esc(r.file)}`;
+        return `<figure><a href="${url}" target="_blank" rel="noopener"><img src="${url}" loading="lazy" alt=""></a>
+          <figcaption><b>${esc(r.provider || "")}</b> · ${esc(r.model || "")}<br>${esc((r.prompt || "").slice(0, 90))}</figcaption></figure>`;
+      }).join("");
+    } catch (e) { msg($("imgGalleryMsg"), "Failed to load images: " + e.message, "err"); }
+  }
+
+  // ================= API KEYS =================
+  async function loadScopes() {
+    const { scopes } = await api("/api/superadmin/scopes");
+    scopes.sort((a, b) => a.scope.localeCompare(b.scope));
+    $("scopeChecks").innerHTML = scopes.map((s) => `
+      <label class="check"><input type="checkbox" class="scope" value="${esc(s.scope)}" ${s.scope === "admin" ? "checked" : ""} />
+        <span><code>${esc(s.scope)}</code><br><span class="desc">${esc(s.description)}</span></span></label>`).join("");
+  }
+  async function loadRoles() {
+    const { roles } = await api("/api/superadmin/roles");
+    if (!roles || !roles.length) { $("roleChecks").innerHTML = '<span class="desc">No roles defined.</span>'; return; }
+    $("roleChecks").innerHTML = roles.map((r) => `
+      <label class="check"><input type="checkbox" class="role" value="${esc(r.id)}" data-name="${esc(r.name)}" />
+        <span><code>${esc(r.name)}</code><br><span class="desc">${esc((r.permissions || []).join(", ") || "—")}</span></span></label>`).join("");
+  }
+  async function mint() {
+    msg($("mintMsg"), "", ""); hide($("keyResult"));
+    const name = $("keyName").value.trim();
+    if (!name) { msg($("mintMsg"), "Name is required.", "err"); return; }
+    const scopes = Array.from(document.querySelectorAll(".scope:checked")).map((c) => c.value);
+    const roles = Array.from(document.querySelectorAll(".role:checked")).map((c) => c.value);
+    const days = parseInt($("expiresInDays").value, 10);
+    $("mintBtn").disabled = true;
+    try {
+      const r = await api("/api/superadmin/apikeys", {
+        method: "POST", body: JSON.stringify({ name, scopes, roles, expiresInDays: isNaN(days) ? 0 : days }),
+      });
+      $("keyResult").innerHTML = `<div class="keyout"><strong>Key minted: ${esc(r.name)}</strong>
+        <code class="mono" id="theKey">${esc(r.key)}</code>
+        <button class="ghost" id="copyBtn">Copy</button>
+        <p class="warn">⚠ ${esc(r.warning || "Store this key now — it cannot be retrieved again.")}</p></div>`;
+      show($("keyResult"));
+      $("copyBtn").onclick = () => navigator.clipboard.writeText(r.key);
+      $("keyName").value = "";
+      await loadKeys();
+    } catch (e) { msg($("mintMsg"), "Mint failed: " + e.message, "err"); }
+    finally { $("mintBtn").disabled = false; }
+  }
+  async function loadKeys() {
+    msg($("listMsg"), "", "");
+    try {
+      const { apiKeys } = await api("/api/superadmin/apikeys");
+      if (!apiKeys.length) { $("keysBody").innerHTML = '<tr><td colspan="6" class="desc">No keys yet.</td></tr>'; return; }
+      $("keysBody").innerHTML = apiKeys.map((k) => `
+        <tr><td>${esc(k.name)}</td><td class="mono">${esc(k.prefix || "")}…</td>
+          <td>${(k.scopes || []).map((s) => `<span class="pill">${esc(s)}</span>`).join(" ")}</td>
+          <td>${(k.roles || []).map((r) => `<span class="pill">${esc(r)}</span>`).join(" ") || "—"}</td>
+          <td>${k.revoked ? '<span class="pill revoked">revoked</span>' : '<span class="pill">active</span>'}</td>
+          <td>${k.revoked ? "" : `<button class="danger" data-id="${esc(k.id)}">Revoke</button>`}</td></tr>`).join("");
+      $("keysBody").querySelectorAll(".danger").forEach((b) => b.onclick = () => revoke(b.dataset.id));
+    } catch (e) { msg($("listMsg"), "Failed to load keys: " + e.message, "err"); }
+  }
+  async function revoke(id) {
+    if (!confirm("Revoke this key? This is immediate and irreversible.")) return;
+    try { await api("/api/superadmin/apikeys/" + id, { method: "DELETE" }); await loadKeys(); }
+    catch (e) { msg($("listMsg"), "Revoke failed: " + e.message, "err"); }
+  }
+
+  // ---------- wire up ----------
+  $("loginBtn").onclick = login;
+  $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+  $("logoutBtn").onclick = logout;
+  $("provRefresh").onclick = loadProviders;
+  $("provSaveBtn").onclick = saveProvider;
+  $("genBtn").onclick = generate;
+  $("streamBtn").onclick = streamCall;
+  $("imgGenBtn").onclick = generateImage;
+  $("imgRefresh").onclick = loadImages;
+  $("mintBtn").onclick = mint;
+  $("keysRefresh").onclick = loadKeys;
+
+  // ---------- bootstrap: reuse the dashboard (/_/) superuser session ----------
+  function discoverDashboardToken() {
+    for (let i = 0; i < localStorage.length; i++) {
+      try {
+        const v = JSON.parse(localStorage.getItem(localStorage.key(i)));
+        const rec = v && (v.record || v.model);
+        if (v && typeof v.token === "string" && v.token && rec && rec.collectionName === "_superusers") return v.token;
+      } catch (_) {}
+    }
+    return "";
+  }
+  if (!token) token = discoverDashboardToken();
+  if (token) { sessionStorage.setItem("pb_admin_token", token); enterApp().catch(() => logout()); }
+})();
+</script>
+</body>
+</html>
