@@ -240,6 +240,30 @@ row with its key. No schema migration.
 
 ---
 
+## Rate limiting & per-user quota (airatelimit.go)
+
+Enforced BEFORE the upstream call (a blocked request costs nothing), keyed by
+the authenticated identity. **Superusers are exempt** — and since an API key acts
+as the minting superuser on the AI routes, trusted service-key traffic is exempt
+too. Limits target end-user JWTs (the abuse vector); keys are revocable. Two gates:
+
+- **requests/min** — in-memory sliding window (closes the concurrent-burst hole a
+  "count rows" check would leave, since `_aiUsage` rows are written *after* a call).
+- **tokens/day** — summed from `_aiUsage.totalTokens` (persistent cost cap).
+
+Over a gate → **429** with a descriptive message. Config via env (read at startup,
+`0` disables a gate):
+
+| env | default | meaning |
+|---|---|---|
+| `AI_RATE_LIMIT_PER_MIN` | `60` | max AI requests/min per user |
+| `AI_TOKEN_QUOTA_PER_DAY` | `0` (off) | max tokens/24h per user — **set this to cap spend** |
+
+`GET /api/ai/limits` (authed) reports the caller's `ratePerMin`, `requestsLastMin`,
+`tokensPerDay`, `tokensUsedToday`, and `exempt`. Default config rate-limits loops
+but does NOT cap tokens — set `AI_TOKEN_QUOTA_PER_DAY` on Render to enable the
+cost ceiling.
+
 ## Capability ladder
 
 What this setup can extract, cheap+safe → complex. Each rung ships independently.

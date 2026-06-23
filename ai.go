@@ -338,6 +338,33 @@ func registerAIProviderHooks(app core.App) {
 
 func registerAIRoutes(se *core.ServeEvent, app core.App) {
 	registerAIProviderHooks(app)
+	aiActiveLimits = aiLimitsFromEnv() // rate limit + per-user token quota (env-configured)
+
+	// --- limits (authed): the caller's current rate/quota usage vs the configured
+	//     ceilings. Superusers are exempt, so they report 0 used. ---
+	se.Router.GET("/api/ai/limits", func(e *core.RequestEvent) error {
+		uid := ""
+		exempt := true
+		if e.Auth != nil && !e.Auth.IsSuperuser() {
+			uid = e.Auth.Id
+			exempt = false
+		}
+		used := 0
+		if uid != "" && aiActiveLimits.tokensPerDay > 0 {
+			used, _ = aiTokensUsedSince(app, uid, time.Now().Add(-24*time.Hour))
+		}
+		reqs := 0
+		if uid != "" {
+			reqs = aiRateWindow.count(uid, time.Minute)
+		}
+		return e.JSON(http.StatusOK, map[string]any{
+			"exempt":           exempt, // superuser / service-key callers aren't limited
+			"ratePerMin":       aiActiveLimits.ratePerMin,
+			"requestsLastMin":  reqs,
+			"tokensPerDay":     aiActiveLimits.tokensPerDay, // 0 = unlimited
+			"tokensUsedToday":  used,
+		})
+	}).Bind(apis.RequireAuth())
 
 	// --- catalog (authed): the full provider allowlist + descriptions, so UIs
 	//     can populate provider pickers. Pure capability metadata, no secrets. ---
@@ -368,6 +395,9 @@ func registerAIRoutes(se *core.ServeEvent, app core.App) {
 		if err != nil {
 			return err
 		}
+		if lerr := enforceAILimits(app, e, aiActiveLimits); lerr != nil {
+			return lerr
+		}
 		lm := p.build(model, cfg.apiKey, cfg.baseURL)
 		start := time.Now()
 		result, gerr := goai.GenerateText(e.Request.Context(), lm, aiBuildOptions(req)...)
@@ -390,6 +420,9 @@ func registerAIRoutes(se *core.ServeEvent, app core.App) {
 		p, cfg, req, model, err := resolveAICall(app, e)
 		if err != nil {
 			return err
+		}
+		if lerr := enforceAILimits(app, e, aiActiveLimits); lerr != nil {
+			return lerr
 		}
 		lm := p.build(model, cfg.apiKey, cfg.baseURL)
 		start := time.Now()

@@ -160,6 +160,9 @@ func registerAIImageRoutes(se *core.ServeEvent, app core.App) {
 		if model == "" {
 			return e.BadRequestError("'model' is required (no defaultModel configured for this provider)", nil)
 		}
+		if lerr := enforceAILimits(app, e, aiActiveLimits); lerr != nil {
+			return lerr
+		}
 
 		opts := []goai.ImageOption{goai.WithImagePrompt(req.Prompt)}
 		if req.Size != "" {
