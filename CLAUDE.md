@@ -22,6 +22,7 @@ SQLite DB to an S3 target (any S3 or S3-compatible store; credentials via `.env`
 7. A real, scoped, revocable **API-key** system ✅ (`_apiKeys` system collection)
 8. Settings management over MCP ✅ (`get_settings` / `update_settings`)
 9. **RBAC** for users AND API keys ✅ (`_roles`/`_permissions`, native rules, auto-governed) — see `docs/RBAC.md`
+10. **AI proxy** over goai ✅ (24 providers; `/api/ai/*` text/stream/image; encrypted provider keys; usage metering; per-user rate limit + token quota; unified `/admin` console) — see `docs/AI-PROXY.md`
 
 ## Stack & pinned versions
 
@@ -40,6 +41,12 @@ main.go              framework entry: routes, provision endpoint, field-type cat
 apikeys.go           API-key system: _apiKeys system collection, scopes, auth middleware
 roles.go             user RBAC: _roles + _permissions system collections, native-rule enforcement
 serviceaccounts.go   _serviceAccounts auth collection; the roled identity an API key acts as on data routes
+ai.go                AI proxy: 24 goai providers, /api/ai/{provider}/generate + /stream, _aiProviders (encrypted keys) + _aiUsage (metering), catalog/limits routes
+aiimage.go           AI image gen: /api/ai/{provider}/image -> _aiImages file field (S3/R2 when Files storage on) + preview URLs (openai/google/vertex/azure)
+airatelimit.go       AI rate limit (req/min, in-memory) + per-user token quota (tokens/day from _aiUsage); superusers/keys exempt; env-configured
+adminui.go           unified /admin console (embeds admin_ui.html): sidebar over AI Providers, Images, API Keys
+admin_ui.html        the /admin console page (PocketBase-native palette, auto-login via dashboard session)
+keysui.go / aiui.go  thin redirects: /admin/apikeys -> /admin#keys, /admin/ai -> /admin#providers (folded into the unified console)
 Dockerfile           multi-stage: Go build (golang:1.25) -> alpine + Litestream
 docker-compose.yml   pocketbase(+litestream) service; secrets via .env (env_file)
 .env.example         secrets template -> copy to .env (gitignored); inject from a vault in prod
@@ -84,6 +91,22 @@ Rebuild MCP after editing `mcp/`: `cd mcp && go build -o pb-mcp .` then restart 
 | POST | `/api/superadmin/apikeys` | superuser | mint a key with `scopes` + `roles` (plaintext returned once) |
 | GET | `/api/superadmin/apikeys` | superuser | list keys (metadata only) |
 | DELETE | `/api/superadmin/apikeys/{id}` | superuser | revoke a key |
+
+**AI proxy** (auth: any JWT, or an `ai:use` API key — see `docs/AI-PROXY.md`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/ai/{provider}/generate` | text generation (24 goai providers) → text + usage |
+| POST | `/api/ai/{provider}/stream` | streamed text (SSE) |
+| POST | `/api/ai/{provider}/image` | image gen (openai/google/vertex/azure) → stored file + preview URL |
+| GET | `/api/ai/catalog` · `/api/ai/image-catalog` · `/api/ai/providers` | provider allowlist · image-capable · usable-now |
+| GET | `/api/ai/limits` | caller's rate/quota usage vs ceilings |
+| GET | `/admin` | unified console (AI Providers + Images + API Keys) |
+
+Provider keys live in the `_aiProviders` system collection, AES-encrypted at rest
+by a save-hook (reuses `PB_ENCRYPTION_KEY`); manage via `/admin` or the records
+API, **not** the PB dashboard. Limits via env: `AI_RATE_LIMIT_PER_MIN` (default
+60), `AI_TOKEN_QUOTA_PER_DAY` (default 0 = off). OpenAI images: use `gpt-image-1`.
 
 Plus all standard PocketBase endpoints (`/api/collections`, `/api/collections/{c}/records`, `/api/settings`, …).
 
@@ -228,8 +251,14 @@ RBAC / multi-role rules guide (`docs/RBAC.md`).
 - `.claude/skills/pocketbase-rbac-ops/` — playbook for any agent **operating** a
   live instance (provision schema, manage RBAC, mint roled keys; encodes the
   ask-the-user guardrails). Thin wrapper over the MCP tools + `docs/`.
+- `.claude/skills/pocketbase-ai-proxy-ops/` — playbook for **operating the AI
+  proxy** (configure providers, generate text/images, manage rate limits +
+  quotas, enable S3 images; encodes the gpt-image-1 + don't-spend-without-asking
+  guardrails). Thin wrapper over the `ai_*` MCP tools + `docs/AI-PROXY.md`.
 - `.claude/skills/pocketbase-rbac-scaffold/` — generator that **recreates** this
   stack in a new project. Bundles verbatim `.tmpl` snapshots of the `*.go` + infra
   files; SKILL.md is the copy → set module → secrets → build → verify procedure.
   Templates are NOT auto-synced — re-copy them when the reference `*.go` change
-  (sync snippet is in that SKILL.md).
+  (sync snippet is in that SKILL.md). NOTE: the AI proxy files (`ai.go`,
+  `aiimage.go`, `airatelimit.go`, `adminui.go`, `admin_ui.html`) are **not yet
+  templated** — the scaffold recreates the RBAC platform only.
