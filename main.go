@@ -205,6 +205,7 @@ func main() {
 		}
 		se.Router.Bind(apiKeyAuthMiddleware(app))
 		registerAPIKeyRoutes(se, app)
+		registerKeysUI(se) // GET /admin/apikeys — browser UI for minting keys
 
 		// User RBAC: ensure the _permissions + _roles system collections, run the
 		// migration/seed, and expose the permission catalog. Enforcement is via

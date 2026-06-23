@@ -7,6 +7,7 @@ RUN apk add --no-cache git
 WORKDIR /src
 COPY go.mod ./
 COPY *.go ./
+COPY *.html ./
 RUN go mod tidy
 RUN CGO_ENABLED=0 go build -trimpath -o /pb/pocketbase .
 

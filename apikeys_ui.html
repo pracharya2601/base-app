@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>API Keys — base-app</title>
+<style>
+  /* Palette mirrors PocketBase's admin UI tokens (ui/src/css/vars.css) so this
+     page feels native next to /_/. Light theme by default; dark via media query. */
+  :root {
+    --baseFont:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --monoFont:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --pageBg:#f8f9fa; --surface:#fff;
+    --alt1:#f8f9fa; --alt2:#e4e8ec; --alt3:#dce0e5; --alt4:#d3d9df;
+    --txt:#25272d; --txtHint:#687278; --txtDisabled:#a2a9ae;
+    --primary:#25272d; --primaryTxt:#fff;
+    --accent:#1055c9; --success:#22a96d; --warning:#e57534; --danger:#c33751;
+    --radius:5px; --lgRadius:12px; --inputPad:13px;
+    --shadow:0px 8px 5px -5px rgba(34,36,36,0.1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --pageBg:#161616; --surface:#1c1c1c;
+      --alt1:#1e1e1e; --alt2:#2a2a2a; --alt3:#323232; --alt4:#3a3a3a;
+      --txt:#ebebeb; --txtHint:#9aa0a6; --txtDisabled:#6f6f6f;
+      --primary:#ebebeb; --primaryTxt:#1c1c1c;
+      --accent:#4273bd; --success:#27865d; --warning:#cf4e17; --danger:#bb303e;
+      --shadow:0px 8px 5px -5px rgba(0,0,0,0.3);
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--pageBg); color:var(--txt); font-family:var(--baseFont); font-size:14px; line-height:22px; }
+  .wrap { max-width:840px; margin:0 auto; padding:40px 20px 80px; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 4px; }
+  .sub { color:var(--txtHint); margin:0 0 30px; }
+  .card { background:var(--surface); border:1px solid var(--alt2); border-radius:var(--lgRadius); padding:24px; margin-bottom:20px; box-shadow:var(--shadow); }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--txtHint); font-weight:600; margin:0 0 16px; }
+  label { display:block; font-size:13px; color:var(--txtHint); margin:0 0 6px; }
+  input[type=text], input[type=email], input[type=password], input[type=number] {
+    width:100%; padding:0 var(--inputPad); height:45px; background:var(--surface); border:1px solid var(--alt4); border-radius:var(--radius); color:var(--txt); font:inherit; }
+  input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 2px color-mix(in srgb, var(--accent), transparent 80%); }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  .field { margin-bottom:16px; }
+  button { padding:0 18px; height:45px; border:0; border-radius:var(--radius); background:var(--primary); color:var(--primaryTxt); font:inherit; font-weight:600; cursor:pointer; transition:filter .15s; }
+  button:hover { filter:brightness(1.15); }
+  button.ghost { background:transparent; border:1px solid var(--alt4); color:var(--txt); font-weight:500; height:35px; padding:0 14px; }
+  button.danger { background:transparent; border:1px solid var(--danger); color:var(--danger); height:30px; padding:0 12px; font-size:13px; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .checks { display:grid; grid-template-columns:repeat(auto-fill,minmax(230px,1fr)); gap:10px; }
+  .check { display:flex; gap:9px; align-items:flex-start; padding:10px 12px; background:var(--alt1); border:1px solid var(--alt2); border-radius:var(--radius); cursor:pointer; transition:border-color .15s; }
+  .check:hover { border-color:var(--alt4); }
+  .check input { margin-top:3px; accent-color:var(--accent); }
+  .check .desc { color:var(--txtHint); font-size:13px; }
+  .check code { color:var(--txt); }
+  .hidden { display:none !important; }
+  .msg { padding:11px 13px; border-radius:var(--radius); margin-bottom:14px; font-size:13px; }
+  .msg.err { background:color-mix(in srgb, var(--danger), transparent 88%); border:1px solid var(--danger); color:var(--danger); }
+  .msg.ok  { background:color-mix(in srgb, var(--success), transparent 88%); border:1px solid var(--success); color:var(--success); }
+  .keyout { background:color-mix(in srgb, var(--warning), transparent 92%); border:1px solid var(--warning); border-radius:var(--radius); padding:16px; }
+  .keyout code { display:block; word-break:break-all; font-size:13px; color:var(--txt); margin:10px 0; font-family:var(--monoFont); }
+  .keyout .warn { color:var(--warning); font-size:13px; margin:8px 0 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--alt2); }
+  th { color:var(--txtHint); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.03em; }
+  .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; background:var(--alt1); border:1px solid var(--alt3); color:var(--txtHint); }
+  .pill.revoked { color:var(--danger); border-color:var(--danger); }
+  .topbar { display:flex; justify-content:space-between; align-items:center; }
+  .mono { font-family:var(--monoFont); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>API Keys</h1>
+  <p class="sub">Mint scoped, roled, revocable keys. Each key creates a backing service account automatically.</p>
+
+  <!-- LOGIN -->
+  <div class="card" id="loginCard">
+    <h2>Superadmin login</h2>
+    <div id="loginMsg"></div>
+    <div class="row">
+      <div class="field"><label>Email</label><input type="email" id="email" value="admin@example.com" autocomplete="username" /></div>
+      <div class="field"><label>Password</label><input type="password" id="password" autocomplete="current-password" /></div>
+    </div>
+    <button id="loginBtn">Log in</button>
+  </div>
+
+  <!-- APP (after login) -->
+  <div id="app" class="hidden">
+    <div class="card">
+      <div class="topbar">
+        <h2 style="margin:0">Mint a new key</h2>
+        <button class="ghost" id="logoutBtn">Log out</button>
+      </div>
+      <div id="mintMsg" style="margin-top:16px"></div>
+      <div id="keyResult" class="hidden"></div>
+
+      <div class="field" style="margin-top:16px"><label>Name (required)</label><input type="text" id="keyName" placeholder="e.g. mcp-server" /></div>
+      <div class="field"><label>Expires in days (0 / blank = never)</label><input type="number" id="expiresInDays" min="0" placeholder="0" /></div>
+
+      <div class="field">
+        <label>Control-plane scopes — gate schema/settings/key routes</label>
+        <div class="checks" id="scopeChecks"></div>
+      </div>
+
+      <div class="field">
+        <label>Data-plane roles — what records the key can touch (via its service account)</label>
+        <div class="checks" id="roleChecks"></div>
+      </div>
+
+      <button id="mintBtn">Generate key</button>
+    </div>
+
+    <!-- EXISTING KEYS -->
+    <div class="card">
+      <div class="topbar"><h2 style="margin:0">Existing keys</h2><button class="ghost" id="refreshBtn">Refresh</button></div>
+      <div id="listMsg" style="margin-top:12px"></div>
+      <table id="keysTable" style="margin-top:8px"><thead>
+        <tr><th>Name</th><th>Prefix</th><th>Scopes</th><th>Roles</th><th>Status</th><th></th></tr>
+      </thead><tbody></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Same-origin: the page is served by the PocketBase binary itself.
+  const API = "";
+  let token = sessionStorage.getItem("pb_admin_token") || "";
+
+  const $ = (id) => document.getElementById(id);
+  const show = (el) => el.classList.remove("hidden");
+  const hide = (el) => el.classList.add("hidden");
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
+
+  function msg(el, text, kind) { el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : ""; }
+
+  async function api(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    if (token) headers["Authorization"] = token;
+    const res = await fetch(API + path, Object.assign({}, opts, { headers }));
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.message || (body.data && JSON.stringify(body.data)) || ("HTTP " + res.status));
+    return body;
+  }
+
+  // ---- login ----
+  async function login() {
+    msg($("loginMsg"), "", "");
+    $("loginBtn").disabled = true;
+    try {
+      const r = await api("/api/collections/_superusers/auth-with-password", {
+        method: "POST",
+        body: JSON.stringify({ identity: $("email").value.trim(), password: $("password").value }),
+      });
+      token = r.token;
+      sessionStorage.setItem("pb_admin_token", token);
+      await enterApp();
+    } catch (e) {
+      msg($("loginMsg"), "Login failed: " + e.message, "err");
+    } finally {
+      $("loginBtn").disabled = false;
+    }
+  }
+
+  function logout() {
+    token = "";
+    sessionStorage.removeItem("pb_admin_token");
+    hide($("app")); show($("loginCard"));
+  }
+
+  async function enterApp() {
+    hide($("loginCard")); show($("app"));
+    await Promise.all([loadScopes(), loadRoles()]);
+    await loadKeys();
+  }
+
+  // ---- form population ----
+  async function loadScopes() {
+    const { scopes } = await api("/api/superadmin/scopes");
+    scopes.sort((a, b) => a.scope.localeCompare(b.scope));
+    $("scopeChecks").innerHTML = scopes.map((s) => `
+      <label class="check">
+        <input type="checkbox" class="scope" value="${esc(s.scope)}" ${s.scope === "admin" ? "checked" : ""} />
+        <span><code>${esc(s.scope)}</code><br><span class="desc">${esc(s.description)}</span></span>
+      </label>`).join("");
+  }
+
+  async function loadRoles() {
+    const { roles } = await api("/api/superadmin/roles");
+    if (!roles || !roles.length) { $("roleChecks").innerHTML = '<span class="desc">No roles defined.</span>'; return; }
+    $("roleChecks").innerHTML = roles.map((r) => `
+      <label class="check">
+        <input type="checkbox" class="role" value="${esc(r.id)}" data-name="${esc(r.name)}" />
+        <span><code>${esc(r.name)}</code><br><span class="desc">${esc((r.permissions || []).join(", ") || "—")}</span></span>
+      </label>`).join("");
+  }
+
+  // ---- mint ----
+  async function mint() {
+    msg($("mintMsg"), "", ""); hide($("keyResult"));
+    const name = $("keyName").value.trim();
+    if (!name) { msg($("mintMsg"), "Name is required.", "err"); return; }
+    const scopes = Array.from(document.querySelectorAll(".scope:checked")).map((c) => c.value);
+    const roles = Array.from(document.querySelectorAll(".role:checked")).map((c) => c.value);
+    const days = parseInt($("expiresInDays").value, 10);
+    $("mintBtn").disabled = true;
+    try {
+      const r = await api("/api/superadmin/apikeys", {
+        method: "POST",
+        body: JSON.stringify({ name, scopes, roles, expiresInDays: isNaN(days) ? 0 : days }),
+      });
+      $("keyResult").innerHTML = `
+        <div class="keyout">
+          <strong>Key minted: ${esc(r.name)}</strong>
+          <code class="mono" id="theKey">${esc(r.key)}</code>
+          <button class="ghost" id="copyBtn">Copy</button>
+          <p class="warn">⚠ ${esc(r.warning || "Store this key now — it cannot be retrieved again.")}</p>
+        </div>`;
+      show($("keyResult"));
+      $("copyBtn").onclick = () => navigator.clipboard.writeText(r.key);
+      $("keyName").value = "";
+      await loadKeys();
+    } catch (e) {
+      msg($("mintMsg"), "Mint failed: " + e.message, "err");
+    } finally {
+      $("mintBtn").disabled = false;
+    }
+  }
+
+  // ---- list / revoke ----
+  async function loadKeys() {
+    msg($("listMsg"), "", "");
+    try {
+      const { apiKeys } = await api("/api/superadmin/apikeys");
+      const tbody = $("keysTable").querySelector("tbody");
+      if (!apiKeys.length) { tbody.innerHTML = '<tr><td colspan="6" class="desc">No keys yet.</td></tr>'; return; }
+      tbody.innerHTML = apiKeys.map((k) => `
+        <tr>
+          <td>${esc(k.name)}</td>
+          <td class="mono">${esc(k.prefix || "")}…</td>
+          <td>${(k.scopes || []).map((s) => `<span class="pill">${esc(s)}</span>`).join(" ")}</td>
+          <td>${(k.roles || []).map((r) => `<span class="pill">${esc(r)}</span>`).join(" ") || "—"}</td>
+          <td>${k.revoked ? '<span class="pill revoked">revoked</span>' : '<span class="pill">active</span>'}</td>
+          <td>${k.revoked ? "" : `<button class="danger" data-id="${esc(k.id)}">Revoke</button>`}</td>
+        </tr>`).join("");
+      tbody.querySelectorAll(".danger").forEach((b) => b.onclick = () => revoke(b.dataset.id));
+    } catch (e) {
+      msg($("listMsg"), "Failed to load keys: " + e.message, "err");
+    }
+  }
+
+  async function revoke(id) {
+    if (!confirm("Revoke this key? This is immediate and irreversible.")) return;
+    try { await api("/api/superadmin/apikeys/" + id, { method: "DELETE" }); await loadKeys(); }
+    catch (e) { msg($("listMsg"), "Revoke failed: " + e.message, "err"); }
+  }
+
+  // ---- wire up ----
+  $("loginBtn").onclick = login;
+  $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
+  $("logoutBtn").onclick = logout;
+  $("mintBtn").onclick = mint;
+  $("refreshBtn").onclick = loadKeys;
+
+  // Discover the PocketBase dashboard's superuser token from same-origin
+  // localStorage, so being logged into /_/ logs you in here too. The dashboard
+  // uses PocketBase's LocalAuthStore: a JSON blob with { token, record|model }
+  // whose record belongs to the _superusers collection. We scan for it rather
+  // than hardcode the storage key (which can change across versions).
+  function discoverDashboardToken() {
+    for (let i = 0; i < localStorage.length; i++) {
+      try {
+        const v = JSON.parse(localStorage.getItem(localStorage.key(i)));
+        const rec = v && (v.record || v.model);
+        if (v && typeof v.token === "string" && v.token && rec && rec.collectionName === "_superusers") {
+          return v.token;
+        }
+      } catch (_) { /* not JSON / not an auth blob */ }
+    }
+    return "";
+  }
+
+  // Bootstrap: 1) our own session token, else 2) the dashboard's token.
+  // enterApp() hits a superuser-gated endpoint, so an expired/invalid token
+  // falls back to the login form via logout().
+  if (!token) token = discoverDashboardToken();
+  if (token) {
+    sessionStorage.setItem("pb_admin_token", token);
+    enterApp().catch(() => logout());
+  }
+})();
+</script>
+</body>
+</html>

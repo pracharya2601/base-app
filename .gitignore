@@ -1,8 +1,9 @@
 # PocketBase runtime data (DB + uploads) — never commit
 pb_data/
 
-# Compiled MCP binary
+# Compiled binaries (the image is built in Docker / CI, not committed)
 mcp/pb-mcp
+/base-app
 
 # Secrets / tokens — keep these OUT of version control
 *.token

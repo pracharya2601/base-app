@@ -1,0 +1,43 @@
+# Render Blueprint — deploys the prebuilt ghcr.io image as a web service.
+# Flow: push to main -> GitHub Actions builds & pushes ghcr image -> Render
+# pulls :latest and (re)deploys. Durability is via Litestream -> S3 (no Render
+# disk needed): /pb/pb_data is ephemeral, but Litestream restores it on boot.
+#
+# Setup:
+#   1. Make the ghcr package PUBLIC (Repo -> Packages -> base-app -> Settings),
+#      OR add a Render Registry Credential and reference it under image.creds.
+#   2. In Render: New -> Blueprint -> point at this repo.
+#   3. Fill the `sync: false` secrets (S3 creds) in the Render dashboard.
+services:
+  - type: web
+    name: base-app
+    runtime: image
+    plan: starter # 512MB/0.5CPU; bump if you load-test past it
+    region: oregon # pick the region nearest your users / S3 bucket
+    image:
+      # >>> CONFIRM THIS: ghcr.io/<owner>/<repo>:latest <<<
+      url: ghcr.io/pracharya2601/base-app:latest
+      # For a PRIVATE package, add a Registry Credential in Render and:
+      # creds:
+      #   fromRegistryCreds: ghcr-base-app
+    healthCheckPath: /api/health # PocketBase's built-in health endpoint
+    autoDeploy: true # redeploy when a new :latest image is pushed
+    envVars:
+      # Render injects PORT automatically; entrypoint binds to it (falls back 8090).
+      - key: PORT
+        value: "10000"
+
+      # --- Litestream -> S3 durability. Leave LITESTREAM_BUCKET empty to run
+      #     WITHOUT replication (data is then lost on every redeploy). ---
+      - key: LITESTREAM_BUCKET
+        sync: false # set in dashboard
+      - key: LITESTREAM_REGION
+        value: us-east-1
+      - key: LITESTREAM_ENDPOINT
+        sync: false # empty for real AWS S3; URL for R2/B2/MinIO
+      - key: LITESTREAM_FORCE_PATH_STYLE
+        value: "false" # "true" for S3-compatible stores (R2/B2/MinIO)
+      - key: LITESTREAM_ACCESS_KEY_ID
+        sync: false
+      - key: LITESTREAM_SECRET_ACCESS_KEY
+        sync: false

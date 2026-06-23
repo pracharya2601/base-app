@@ -2,7 +2,9 @@
 set -e
 
 DB=/pb/pb_data/data.db
-PB_CMD="/pb/pocketbase serve --http=0.0.0.0:8090"
+# Render (and most PaaS) inject the listen port via $PORT. Fall back to 8090
+# for local/docker-compose where PORT is unset.
+PB_CMD="/pb/pocketbase serve --http=0.0.0.0:${PORT:-8090}"
 
 # No S3 target configured? Run PocketBase directly, no replication.
 # (Local dev convenience — there is NO durability in this mode.)
