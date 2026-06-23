@@ -18,5 +18,8 @@ mcp/pb-mcp
 # Claude Desktop config backups created during setup
 **/claude_desktop_config.json.bak.*
 
+# Throwaway local test page (Google OAuth login harness)
+google-login-test.html
+
 # OS noise
 .DS_Store
