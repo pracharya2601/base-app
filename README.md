@@ -37,7 +37,7 @@ A few beliefs drive this:
 | **AI proxy** over 24 providers | ✅ | text/stream/image, encrypted keys, usage metering, rate limits — [docs](docs/AI-PROXY.md) |
 | **Automated tests + CI gate** | ✅ | unit + integration + HTTP-level; `go test -race` gates the image build |
 | **Load-test harness** | ✅ | zero-dependency Go load generator — [`loadtest/`](loadtest/) |
-| Orchestration / workflows | 🚧 | exploring — see [Roadmap](#roadmap) |
+| **AI agent company** (orchestrator) | 🚧 | MVP shipping: a role-based software team that drafts work, humans approve to advance — [`internal/orchestrator/`](internal/orchestrator/) |
 | User-deployable functions | 🔬 | researching (WASM sandbox) — see [Roadmap](#roadmap) |
 
 ## Quick start
@@ -114,8 +114,15 @@ base-app is built in rungs — each one makes the backend more operable from the
 - Extend HTTP-level tests to the AI-proxy handlers.
 - Act on load-test findings (e.g. the per-request API-key write was throttled after load testing showed it ~halved keyed-read throughput).
 
-**Mid-term — the orchestration engine (the big bet)**
-The thesis: let admins compose backend automations **from the frontend, without redeploying**, by storing workflows as *data* (not code) and interpreting them with a fixed, safe node catalog (AI call, record CRUD, HTTP request, branch, transform…). Runs are persisted and observable; workflows run as a roled service account so RBAC bounds their blast radius. Declarative and bounded — robustness over raw power.
+**Now building — the AI agent company (orchestrator)** — `internal/orchestrator/`
+The big bet: an always-on team of role-based agents that act as company members and do the work, gated by human approval. **v1 (shipping): a software team** — `product-manager → engineer → reviewer`, **draft-only** (agents produce specs/code/reviews, never execute), where each handoff is a human approval.
+
+- **Agents** are records (`_agents`): role, persona, provider/model. **Tasks** (`_tasks`) move through a state machine `pending → working → needs_review → done` (or `rejected`/`failed`). Every agent action is logged to `_runs` for full observability.
+- **Always-on, but not always-spending**: a tick loop advances one task at a time, only when there's pending work *and* the daily token budget (`ORCH_DAILY_TOKEN_BUDGET`) has room. Failures are terminal, so a poison task can't drain your budget.
+- **Endpoints**: `POST /api/orchestrator/tasks` (kick off), `…/{id}/approve` (advance + hand off to next role), `…/{id}/reject`, `GET /api/orchestrator/status`.
+- Built on the existing primitives — the AI proxy is the agents' brains, RBAC/service accounts will scope what each can touch, token quotas cap spend.
+
+*Next:* multi-step plans, agent-to-agent messaging, an `/admin` board to watch the company, and tools-with-approval (which leads into ↓).
 
 **Research — user-deployable functions**
 A more powerful (and much harder) direction: let people deploy *custom controller code*. The hard part is safely sandboxing untrusted code — the standard answer is **WebAssembly** (Wasmtime / extism). We're evaluating whether to build this on PocketBase or adopt a Rust foundation that ships a WASM runtime natively (e.g. [TrailBase](https://github.com/trailbaseio/trailbase)). This decision likely settles the build-vs-adopt question for the whole platform.
@@ -135,6 +142,7 @@ serviceaccounts.go      service accounts, provision — tightly coupled, one pac
 internal/
   ai/                   the AI proxy feature (package ai) — exports Register*/Ensure*
   adminui/              the /admin console (package adminui) — exports Register*
+  orchestrator/         the AI agent company (package orchestrator) — schema, loop, routes
 mcp/                    the MCP server (separate binary)
 loadtest/               the load-test harness
 docs/                   architecture, RBAC, AI proxy, runbook, decisions

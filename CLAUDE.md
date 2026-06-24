@@ -63,6 +63,15 @@ internal/adminui/ (package adminui) — the admin console, self-contained:
   admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session)
   keysui.go / aiui.go  thin redirects /admin/apikeys, /admin/ai; export RegisterKeys / RegisterAIUI
 
+internal/orchestrator/ (package orchestrator) — the "AI agent company":
+  schema.go          _agents/_tasks/_runs system collections + SeedTeam (PM/engineer/reviewer)
+  orchestrator.go    always-on tick loop: claim a pending task, run its agent via ai.Generate, draft -> needs_review, log a _run; daily token-budget guard; terminal failure (no retry-drain)
+  config.go          env knobs (ORCH_ENABLED/INTERVAL/MAX_TOKENS/DAILY_TOKEN_BUDGET/PROVIDER/MODEL) + the role pipeline (nextRole)
+  routes.go          superuser routes: POST tasks, tasks/{id}/approve (advance + hand off to next role), /reject, GET status
+  *_test.go          unit (pipeline/config) + integration (schema/seed + approve-handoff via ApiScenario)
+
+internal/ai/generate.go  ai.Generate(...) — in-process LLM call (no HTTP) the orchestrator uses
+
 INFRA & TOOLING:
 Dockerfile           multi-stage: Go build (golang:1.25) -> alpine + Litestream
 docker-compose.yml   pocketbase(+litestream) service; secrets via .env (env_file)

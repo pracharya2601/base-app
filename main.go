@@ -11,6 +11,7 @@ import (
 
 	"base-app/internal/adminui"
 	"base-app/internal/ai"
+	"base-app/internal/orchestrator"
 )
 
 // ---- request shapes for /api/superadmin/provision ----
@@ -252,6 +253,16 @@ func main() {
 		adminui.RegisterAdmin(se) // GET /admin — unified console (API keys + AI providers + test)
 
 		registerProvisionRoutes(se, app)
+
+		// Orchestrator (the "AI company"): ensure the _agents/_tasks/_runs schema,
+		// seed the default software team, wire the human-operator routes, and start
+		// the always-on loop. Agents draft work; humans approve to advance.
+		if err := orchestrator.EnsureSchema(app); err != nil {
+			return err
+		}
+		orchestrator.SeedTeam(app)
+		orchestrator.RegisterRoutes(se, app)
+		orchestrator.Start(app)
 
 		return se.Next()
 	})
