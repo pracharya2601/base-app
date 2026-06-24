@@ -248,125 +248,7 @@ func main() {
 		registerAIUI(se)    // GET /admin/ai — standalone provider-keys UI (back-compat)
 		registerAdminUI(se) // GET /admin — unified console (API keys + AI providers + test)
 
-		// Self-describing field-type catalog. PUBLIC (pure capability metadata):
-		// the frontend, the MCP server, and humans all read this to know what
-		// the provision endpoint can build. This is the shared contract.
-		se.Router.GET("/api/superadmin/field-types", func(e *core.RequestEvent) error {
-			return e.JSON(http.StatusOK, map[string]any{"fieldTypes": fieldTypeCatalog()})
-		})
-
-		// One-call provisioning: create collections + seed records + set appName.
-		// Guarded so ONLY a _superusers token can call it.
-		se.Router.POST("/api/superadmin/provision", func(e *core.RequestEvent) error {
-			req := provisionRequest{}
-			if err := e.BindBody(&req); err != nil {
-				return e.BadRequestError("invalid request body", err)
-			}
-
-			result := map[string]any{}
-			created := []string{}
-			existed := []string{}
-			fieldsAdded := map[string][]string{}
-			seeded := map[string]int{}
-
-			// 1. Collections — fully idempotent:
-			//    - collection missing  -> create it with the given fields
-			//    - collection present  -> add only the fields it doesn't have yet
-			//      (server does the fetch-merge-save so callers never replace the
-			//       whole fields array by hand).
-			for _, cs := range req.Collections {
-				col, err := app.FindCollectionByNameOrId(cs.Name)
-				if err != nil {
-					// Not found -> create new.
-					col = core.NewBaseCollection(cs.Name)
-					// superuser-only by default; loosen per your needs.
-					col.ListRule = nil
-					col.ViewRule = nil
-					for _, fs := range cs.Fields {
-						field, ferr := newField(app, fs)
-						if ferr != nil {
-							return e.BadRequestError(ferr.Error(), ferr)
-						}
-						col.Fields.Add(field)
-					}
-					col.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
-					if cs.RBAC {
-						applyRules(col, rbacRules(cs.Name)) // auto-generated role-permission rules
-					}
-					applyRules(col, cs.Rules) // explicit rules override the generated ones
-					if serr := app.Save(col); serr != nil {
-						return e.InternalServerError("failed to create collection "+cs.Name, serr)
-					}
-					created = append(created, cs.Name)
-					continue
-				}
-
-				// Exists -> merge in any fields that aren't already present, and
-				// apply any access rules provided.
-				added := []string{}
-				for _, fs := range cs.Fields {
-					if col.Fields.GetByName(fs.Name) != nil {
-						continue // field already exists — skip (no clobber)
-					}
-					field, ferr := newField(app, fs)
-					if ferr != nil {
-						return e.BadRequestError(ferr.Error(), ferr)
-					}
-					col.Fields.Add(field)
-					added = append(added, fs.Name)
-				}
-				rulesChanged := false
-				if cs.RBAC {
-					rulesChanged = applyRules(col, rbacRules(cs.Name))
-				}
-				if applyRules(col, cs.Rules) {
-					rulesChanged = true
-				}
-				if len(added) > 0 || rulesChanged {
-					if serr := app.Save(col); serr != nil {
-						return e.InternalServerError("failed to update collection "+cs.Name, serr)
-					}
-				}
-				if len(added) > 0 {
-					fieldsAdded[cs.Name] = added
-				}
-				existed = append(existed, cs.Name)
-			}
-
-			// 2. Seed records.
-			for colName, rows := range req.Seed {
-				col, err := app.FindCollectionByNameOrId(colName)
-				if err != nil {
-					return e.BadRequestError("seed target collection not found: "+colName, err)
-				}
-				for _, row := range rows {
-					rec := core.NewRecord(col)
-					for k, v := range row {
-						rec.Set(k, v)
-					}
-					if err := app.Save(rec); err != nil {
-						return e.InternalServerError("failed to seed record in "+colName, err)
-					}
-					seeded[colName]++
-				}
-			}
-
-			// 3. Update a global setting.
-			if req.AppName != "" {
-				settings := app.Settings()
-				settings.Meta.AppName = req.AppName
-				if err := app.Save(settings); err != nil {
-					return e.InternalServerError("failed to update settings", err)
-				}
-				result["appName"] = req.AppName
-			}
-
-			result["collectionsCreated"] = created
-			result["collectionsExisted"] = existed
-			result["fieldsAdded"] = fieldsAdded
-			result["recordsSeeded"] = seeded
-			return e.JSON(http.StatusOK, result)
-		}).Bind(apis.RequireSuperuserAuth())
+		registerProvisionRoutes(se, app)
 
 		return se.Next()
 	})
@@ -374,4 +256,129 @@ func main() {
 	if err := app.Start(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// registerProvisionRoutes wires the public field-type catalog and the
+// superuser-only one-call provisioning endpoint (create collections + add
+// fields + set rules + seed records + appName, all idempotent).
+func registerProvisionRoutes(se *core.ServeEvent, app core.App) {
+	// Self-describing field-type catalog. PUBLIC (pure capability metadata):
+	// the frontend, the MCP server, and humans all read this to know what
+	// the provision endpoint can build. This is the shared contract.
+	se.Router.GET("/api/superadmin/field-types", func(e *core.RequestEvent) error {
+		return e.JSON(http.StatusOK, map[string]any{"fieldTypes": fieldTypeCatalog()})
+	})
+
+	// One-call provisioning: create collections + seed records + set appName.
+	// Guarded so ONLY a _superusers token can call it.
+	se.Router.POST("/api/superadmin/provision", func(e *core.RequestEvent) error {
+		req := provisionRequest{}
+		if err := e.BindBody(&req); err != nil {
+			return e.BadRequestError("invalid request body", err)
+		}
+
+		result := map[string]any{}
+		created := []string{}
+		existed := []string{}
+		fieldsAdded := map[string][]string{}
+		seeded := map[string]int{}
+
+		// 1. Collections — fully idempotent:
+		//    - collection missing  -> create it with the given fields
+		//    - collection present  -> add only the fields it doesn't have yet
+		//      (server does the fetch-merge-save so callers never replace the
+		//       whole fields array by hand).
+		for _, cs := range req.Collections {
+			col, err := app.FindCollectionByNameOrId(cs.Name)
+			if err != nil {
+				// Not found -> create new.
+				col = core.NewBaseCollection(cs.Name)
+				// superuser-only by default; loosen per your needs.
+				col.ListRule = nil
+				col.ViewRule = nil
+				for _, fs := range cs.Fields {
+					field, ferr := newField(app, fs)
+					if ferr != nil {
+						return e.BadRequestError(ferr.Error(), ferr)
+					}
+					col.Fields.Add(field)
+				}
+				col.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+				if cs.RBAC {
+					applyRules(col, rbacRules(cs.Name)) // auto-generated role-permission rules
+				}
+				applyRules(col, cs.Rules) // explicit rules override the generated ones
+				if serr := app.Save(col); serr != nil {
+					return e.InternalServerError("failed to create collection "+cs.Name, serr)
+				}
+				created = append(created, cs.Name)
+				continue
+			}
+
+			// Exists -> merge in any fields that aren't already present, and
+			// apply any access rules provided.
+			added := []string{}
+			for _, fs := range cs.Fields {
+				if col.Fields.GetByName(fs.Name) != nil {
+					continue // field already exists — skip (no clobber)
+				}
+				field, ferr := newField(app, fs)
+				if ferr != nil {
+					return e.BadRequestError(ferr.Error(), ferr)
+				}
+				col.Fields.Add(field)
+				added = append(added, fs.Name)
+			}
+			rulesChanged := false
+			if cs.RBAC {
+				rulesChanged = applyRules(col, rbacRules(cs.Name))
+			}
+			if applyRules(col, cs.Rules) {
+				rulesChanged = true
+			}
+			if len(added) > 0 || rulesChanged {
+				if serr := app.Save(col); serr != nil {
+					return e.InternalServerError("failed to update collection "+cs.Name, serr)
+				}
+			}
+			if len(added) > 0 {
+				fieldsAdded[cs.Name] = added
+			}
+			existed = append(existed, cs.Name)
+		}
+
+		// 2. Seed records.
+		for colName, rows := range req.Seed {
+			col, err := app.FindCollectionByNameOrId(colName)
+			if err != nil {
+				return e.BadRequestError("seed target collection not found: "+colName, err)
+			}
+			for _, row := range rows {
+				rec := core.NewRecord(col)
+				for k, v := range row {
+					rec.Set(k, v)
+				}
+				if err := app.Save(rec); err != nil {
+					return e.InternalServerError("failed to seed record in "+colName, err)
+				}
+				seeded[colName]++
+			}
+		}
+
+		// 3. Update a global setting.
+		if req.AppName != "" {
+			settings := app.Settings()
+			settings.Meta.AppName = req.AppName
+			if err := app.Save(settings); err != nil {
+				return e.InternalServerError("failed to update settings", err)
+			}
+			result["appName"] = req.AppName
+		}
+
+		result["collectionsCreated"] = created
+		result["collectionsExisted"] = existed
+		result["fieldsAdded"] = fieldsAdded
+		result["recordsSeeded"] = seeded
+		return e.JSON(http.StatusOK, result)
+	}).Bind(apis.RequireSuperuserAuth())
 }

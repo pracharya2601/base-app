@@ -40,6 +40,17 @@ var knownScopes = map[string]string{
 	"ai:use":        "Use the AI proxy: generate text/images via /api/ai/* and read the provider catalog.",
 }
 
+// lastUsedStampInterval is the minimum gap (seconds) between "last used" writes
+// for a given key. It throttles a per-request DB write down to ~1/min/key.
+const lastUsedStampInterval = 60
+
+// shouldStampLastUsed reports whether the lastUsedUnix stamp is stale enough to
+// rewrite, given the stored value and the current time (both unix seconds). A
+// zero/old stored value (never used) stamps immediately.
+func shouldStampLastUsed(last, now int64) bool {
+	return now-last >= lastUsedStampInterval
+}
+
 func sha256hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
@@ -167,9 +178,15 @@ func apiKeyAuthMiddleware(app core.App) *hook.Handler[*core.RequestEvent] {
 				return e.UnauthorizedError("API key expired", nil)
 			}
 
-			// best-effort "last used" stamp
-			rec.Set("lastUsedUnix", time.Now().Unix())
-			_ = app.Save(rec)
+			// best-effort "last used" stamp, THROTTLED: stamping on every request
+			// turns each authenticated call into a SQLite write (serialized by the
+			// single writer) — a ~2x throughput tax under load. Once a minute per
+			// key is plenty for an activity timestamp.
+			now := time.Now().Unix()
+			if shouldStampLastUsed(int64(rec.GetInt("lastUsedUnix")), now) {
+				rec.Set("lastUsedUnix", now)
+				_ = app.Save(rec)
+			}
 
 			// DATA PLANE: on record routes the key acts AS its roled service
 			// account, so the SAME native collection rules that gate users gate the
