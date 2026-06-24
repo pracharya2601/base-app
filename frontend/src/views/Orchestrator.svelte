@@ -11,6 +11,34 @@
   let feedback = ''
   let err = ''
 
+  // DB-driven config (Settings panel)
+  let cfg = { provider: '', model: '', maxTokens: '', dailyTokenBudget: '', maxRevisions: '', intervalSeconds: '' }
+  let cfgMsg = ''
+
+  async function loadConfig() {
+    try {
+      const c = await api('/api/orchestrator/config')
+      cfg = {
+        provider: c.provider || '', model: c.model || '',
+        maxTokens: c.maxTokens || '', dailyTokenBudget: c.dailyTokenBudget || '',
+        maxRevisions: c.maxRevisions || '', intervalSeconds: c.intervalSeconds || '',
+      }
+    } catch (e) { err = e.message }
+  }
+  async function saveConfig() {
+    const num = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : undefined }
+    const body = {
+      provider: cfg.provider || undefined, model: cfg.model || undefined,
+      maxTokens: num(cfg.maxTokens), dailyTokenBudget: num(cfg.dailyTokenBudget),
+      maxRevisions: num(cfg.maxRevisions), intervalSeconds: num(cfg.intervalSeconds),
+    }
+    try {
+      await api('/api/orchestrator/config', { method: 'POST', body: JSON.stringify(body) })
+      cfgMsg = 'Saved — applies on the next tick.'
+      loadConfig(); loadStatus()
+    } catch (e) { cfgMsg = 'Save failed: ' + e.message }
+  }
+
   async function loadStatus() {
     try { status = await api('/api/orchestrator/status') } catch (e) { err = e.message }
   }
@@ -58,7 +86,7 @@
 
   $: pending = detail ? (detail.proposedActions || []).filter((p) => p.status === 'proposed') : []
 
-  onMount(() => { loadStatus(); loadTasks() })
+  onMount(() => { loadStatus(); loadConfig(); loadTasks() })
 </script>
 
 <h1>Orchestrator</h1>
@@ -81,6 +109,26 @@
       {#each Object.entries(status.tasks || {}) as [k, v]}<span class="pill" style="margin-right:6px">{k}: {v}</span>{/each}
     </div>
   {:else}<p class="sub" style="margin-top:12px">—</p>{/if}
+</div>
+
+<!-- Settings (DB-driven config) -->
+<div class="card">
+  <div class="topbar"><h2 style="margin:0">Settings</h2><button class="ghost" on:click={loadConfig}>Refresh</button></div>
+  <p class="sub" style="margin-top:-8px">DB-driven config (system tenant). Saved values apply on the next tick; interval applies on restart. Leave a number blank to use the env default.</p>
+  {#if cfgMsg}<div class="msg ok">{cfgMsg}</div>{/if}
+  <div class="row">
+    <div class="field"><label>Provider</label><input type="text" bind:value={cfg.provider} placeholder="anthropic" /></div>
+    <div class="field"><label>Model</label><input type="text" bind:value={cfg.model} placeholder="(provider default)" /></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>Max tokens / call</label><input type="number" bind:value={cfg.maxTokens} min="1" /></div>
+    <div class="field"><label>Daily token budget</label><input type="number" bind:value={cfg.dailyTokenBudget} min="1" /></div>
+  </div>
+  <div class="row">
+    <div class="field"><label>Max revisions</label><input type="number" bind:value={cfg.maxRevisions} min="1" /></div>
+    <div class="field"><label>Interval (seconds · restart)</label><input type="number" bind:value={cfg.intervalSeconds} min="1" /></div>
+  </div>
+  <div class="row" style="margin-top:10px"><button on:click={saveConfig}>Save settings</button></div>
 </div>
 
 <!-- Ops command -->

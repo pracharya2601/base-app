@@ -2,6 +2,9 @@
   import { getToken, clearToken, login } from './lib/api.js'
   import Orchestrator from './views/Orchestrator.svelte'
   import Data from './views/Data.svelte'
+  import Providers from './views/Providers.svelte'
+  import Images from './views/Images.svelte'
+  import Keys from './views/Keys.svelte'
 
   let token = getToken()
   let view = 'orchestrator'
@@ -21,6 +24,9 @@
   const nav = [
     { id: 'orchestrator', label: 'Orchestrator', ico: '🤖' },
     { id: 'data', label: 'Data', ico: '▦' },
+    { id: 'providers', label: 'AI Providers', ico: '✦' },
+    { id: 'images', label: 'Images', ico: '🖼' },
+    { id: 'keys', label: 'API Keys', ico: '⚿' },
   ]
 </script>
 
@@ -45,9 +51,6 @@
         {#each nav as n}
           <a class:active={view === n.id} on:click={() => (view = n.id)}><span class="ico">{n.ico}</span> {n.label}</a>
         {/each}
-        <a href="/admin/ai"><span class="ico">✦</span> AI Providers</a>
-        <a href="/admin/apikeys"><span class="ico">⚿</span> API Keys</a>
-        <a href="/admin/classic"><span class="ico">↩</span> Classic console</a>
       </nav>
       <div class="sidefoot">
         <button class="ghost" style="width:100%" on:click={logout}>Log out</button>
@@ -56,6 +59,9 @@
     <main class="content"><div class="content-inner">
       {#if view === 'orchestrator'}<Orchestrator />{/if}
       {#if view === 'data'}<Data />{/if}
+      {#if view === 'providers'}<Providers />{/if}
+      {#if view === 'images'}<Images />{/if}
+      {#if view === 'keys'}<Keys />{/if}
     </div></main>
   </div>
 {/if}
