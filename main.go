@@ -12,6 +12,7 @@ import (
 
 	"base-app/internal/adminui"
 	"base-app/internal/ai"
+	"base-app/internal/bookings"
 	"base-app/internal/orchestrator"
 	"base-app/internal/support"
 )
@@ -301,6 +302,13 @@ func main() {
 			return err
 		}
 		support.Register(app)
+
+		// Bookings: a SECOND company function on the same engine — proof the
+		// template generalizes (new package + these two lines, zero engine edits).
+		if err := bookings.EnsureSchema(app); err != nil {
+			return err
+		}
+		bookings.Register(app)
 
 		orchestrator.Start(app)
 
