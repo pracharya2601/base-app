@@ -37,16 +37,33 @@ SQLite DB to an S3 target (any S3 or S3-compatible store; credentials via `.env`
 ## File map
 
 ```
-main.go              framework entry: routes, provision endpoint, field-type catalog
-apikeys.go           API-key system: _apiKeys system collection, scopes, auth middleware
+Layout: a `package main` CORE at the root (the tightly-coupled auth/RBAC/
+provision platform — they share package-private types, so they stay one package),
+plus self-contained feature packages under `internal/`. main.go is the thin
+wiring that imports the feature packages. New features should follow this pattern:
+a focused `internal/<feature>` package exporting a `Register*` entry point that
+main.go calls. (Note: the root core is `package main` and so CANNOT be imported —
+shared helpers a feature needs must live in the feature pkg or a shared package.)
+
+ROOT (package main) — the platform core:
+main.go              framework entry: OnServe wiring, provision endpoint, field-type catalog (registerProvisionRoutes)
+apikeys.go           API-key system: _apiKeys system collection, scopes, auth middleware, throttled last-used stamp
 roles.go             user RBAC: _roles + _permissions system collections, native-rule enforcement
 serviceaccounts.go   _serviceAccounts auth collection; the roled identity an API key acts as on data routes
-ai.go                AI proxy: 24 goai providers, /api/ai/{provider}/generate + /stream, _aiProviders (encrypted keys) + _aiUsage (metering), catalog/limits routes
-aiimage.go           AI image gen: /api/ai/{provider}/image -> _aiImages file field (S3/R2 when Files storage on) + preview URLs (openai/google/vertex/azure)
-airatelimit.go       AI rate limit (req/min, in-memory) + per-user token quota (tokens/day from _aiUsage); superusers/keys exempt; env-configured
-adminui.go           unified /admin console (embeds admin_ui.html): sidebar over AI Providers, Images, API Keys
-admin_ui.html        the /admin console page (PocketBase-native palette, auto-login via dashboard session)
-keysui.go / aiui.go  thin redirects: /admin/apikeys -> /admin#keys, /admin/ai -> /admin#providers (folded into the unified console)
+*_test.go            unit + integration + HTTP-level (tests.ApiScenario) tests for the core
+
+internal/ai/ (package ai) — the AI proxy feature, self-contained:
+  ai.go              24 goai providers, /api/ai/{provider}/generate + /stream, _aiProviders (encrypted keys) + _aiUsage (metering); exports EnsureProvidersCollection/EnsureUsageCollection/RegisterRoutes
+  aiimage.go         image gen -> _aiImages file field + preview URLs; exports EnsureImagesCollection/RegisterImageRoutes
+  airatelimit.go     AI rate limit (req/min, in-memory) + per-user token quota; env-configured
+  airatelimit_test.go  rate-limiter + env unit tests
+
+internal/adminui/ (package adminui) — the admin console, self-contained:
+  adminui.go         unified /admin console (embeds admin_ui.html); exports RegisterAdmin
+  admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session)
+  keysui.go / aiui.go  thin redirects /admin/apikeys, /admin/ai; export RegisterKeys / RegisterAIUI
+
+INFRA & TOOLING:
 Dockerfile           multi-stage: Go build (golang:1.25) -> alpine + Litestream
 docker-compose.yml   pocketbase(+litestream) service; secrets via .env (env_file)
 .env.example         secrets template -> copy to .env (gitignored); inject from a vault in prod
@@ -259,6 +276,6 @@ RBAC / multi-role rules guide (`docs/RBAC.md`).
   stack in a new project. Bundles verbatim `.tmpl` snapshots of the `*.go` + infra
   files; SKILL.md is the copy → set module → secrets → build → verify procedure.
   Templates are NOT auto-synced — re-copy them when the reference `*.go` change
-  (sync snippet is in that SKILL.md). NOTE: the AI proxy files (`ai.go`,
-  `aiimage.go`, `airatelimit.go`, `adminui.go`, `admin_ui.html`) are **not yet
-  templated** — the scaffold recreates the RBAC platform only.
+  (sync snippet is in that SKILL.md). NOTE: the feature packages `internal/ai/`
+  and `internal/adminui/` are **not yet templated** — the scaffold recreates the
+  RBAC platform (root `package main`) only.

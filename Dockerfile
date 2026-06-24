@@ -5,9 +5,9 @@
 FROM golang:1.25-alpine AS build
 RUN apk add --no-cache git
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
 COPY *.go ./
-COPY *.html ./
+COPY internal/ ./internal/
 RUN go mod tidy
 RUN CGO_ENABLED=0 go build -trimpath -o /pb/pocketbase .
 

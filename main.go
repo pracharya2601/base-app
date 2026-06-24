@@ -8,6 +8,9 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+
+	"base-app/internal/adminui"
+	"base-app/internal/ai"
 )
 
 // ---- request shapes for /api/superadmin/provision ----
@@ -99,9 +102,9 @@ func applyRules(col *core.Collection, r *collectionRules) bool {
 }
 
 type provisionRequest struct {
-	AppName     string                       `json:"appName"`
-	Collections []collectionSpec             `json:"collections"`
-	Seed        map[string][]map[string]any  `json:"seed"` // collectionName -> []record
+	AppName     string                      `json:"appName"`
+	Collections []collectionSpec            `json:"collections"`
+	Seed        map[string][]map[string]any `json:"seed"` // collectionName -> []record
 }
 
 // newField maps a type string to a concrete PocketBase field. It needs the app
@@ -205,7 +208,7 @@ func main() {
 		}
 		se.Router.Bind(apiKeyAuthMiddleware(app))
 		registerAPIKeyRoutes(se, app)
-		registerKeysUI(se) // GET /admin/apikeys — browser UI for minting keys
+		adminui.RegisterKeys(se) // GET /admin/apikeys — browser UI for minting keys
 
 		// User RBAC: ensure the _permissions + _roles system collections, run the
 		// migration/seed, and expose the permission catalog. Enforcement is via
@@ -234,19 +237,19 @@ func main() {
 		// _aiProviders (encrypted keys) + _aiUsage (metering) system collections,
 		// then wire /api/ai/{provider}/generate + /stream (JWT auth) and the
 		// superuser provider-management routes.
-		if err := ensureAIProvidersCollection(app); err != nil {
+		if err := ai.EnsureProvidersCollection(app); err != nil {
 			return err
 		}
-		if err := ensureAIUsageCollection(app); err != nil {
+		if err := ai.EnsureUsageCollection(app); err != nil {
 			return err
 		}
-		if err := ensureAIImagesCollection(app); err != nil {
+		if err := ai.EnsureImagesCollection(app); err != nil {
 			return err
 		}
-		registerAIRoutes(se, app)
-		registerAIImageRoutes(se, app)
-		registerAIUI(se)    // GET /admin/ai — standalone provider-keys UI (back-compat)
-		registerAdminUI(se) // GET /admin — unified console (API keys + AI providers + test)
+		ai.RegisterRoutes(se, app)
+		ai.RegisterImageRoutes(se, app)
+		adminui.RegisterAIUI(se)  // GET /admin/ai — standalone provider-keys UI (back-compat)
+		adminui.RegisterAdmin(se) // GET /admin — unified console (API keys + AI providers + test)
 
 		registerProvisionRoutes(se, app)
 

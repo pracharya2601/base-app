@@ -1,4 +1,4 @@
-package main
+package ai
 
 import (
 	"encoding/json"
@@ -169,7 +169,7 @@ func aiDecryptKey(stored string) (string, error) {
 // ensureAIProvidersCollection creates the locked _aiProviders system collection.
 // One row per provider: encrypted key + config. apiKeyEnc is never returned over
 // the API (reads expose hasKey only).
-func ensureAIProvidersCollection(app core.App) error {
+func EnsureProvidersCollection(app core.App) error {
 	if _, err := app.FindCollectionByNameOrId(aiProviderCollection); err == nil {
 		return nil
 	}
@@ -188,7 +188,7 @@ func ensureAIProvidersCollection(app core.App) error {
 
 // ensureAIUsageCollection creates the locked _aiUsage metering collection: one
 // row per call. Prompt/response CONTENT is intentionally not stored (privacy).
-func ensureAIUsageCollection(app core.App) error {
+func EnsureUsageCollection(app core.App) error {
 	if _, err := app.FindCollectionByNameOrId(aiUsageCollection); err == nil {
 		return nil
 	}
@@ -336,7 +336,7 @@ func registerAIProviderHooks(app core.App) {
 	app.OnRecordUpdate(aiProviderCollection).BindFunc(normalize)
 }
 
-func registerAIRoutes(se *core.ServeEvent, app core.App) {
+func RegisterRoutes(se *core.ServeEvent, app core.App) {
 	registerAIProviderHooks(app)
 	aiActiveLimits = aiLimitsFromEnv() // rate limit + per-user token quota (env-configured)
 
@@ -358,11 +358,11 @@ func registerAIRoutes(se *core.ServeEvent, app core.App) {
 			reqs = aiRateWindow.count(uid, time.Minute)
 		}
 		return e.JSON(http.StatusOK, map[string]any{
-			"exempt":           exempt, // superuser / service-key callers aren't limited
-			"ratePerMin":       aiActiveLimits.ratePerMin,
-			"requestsLastMin":  reqs,
-			"tokensPerDay":     aiActiveLimits.tokensPerDay, // 0 = unlimited
-			"tokensUsedToday":  used,
+			"exempt":          exempt, // superuser / service-key callers aren't limited
+			"ratePerMin":      aiActiveLimits.ratePerMin,
+			"requestsLastMin": reqs,
+			"tokensPerDay":    aiActiveLimits.tokensPerDay, // 0 = unlimited
+			"tokensUsedToday": used,
 		})
 	}).Bind(apis.RequireAuth())
 

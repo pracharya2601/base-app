@@ -1,4 +1,4 @@
-package main
+package ai
 
 import (
 	"net/http"
@@ -83,7 +83,7 @@ func imageExt(mediaType string) string {
 // of RBAC backfill; VIEW is public ("") so preview URLs (capability links with a
 // random filename) embed directly, while LIST stays superuser-only (nil) so the
 // gallery can't be enumerated.
-func ensureAIImagesCollection(app core.App) error {
+func EnsureImagesCollection(app core.App) error {
 	if _, err := app.FindCollectionByNameOrId(aiImageCollection); err == nil {
 		return nil
 	}
@@ -118,7 +118,7 @@ func previewBaseURL(app core.App, e *core.RequestEvent) string {
 	return scheme + "://" + e.Request.Host
 }
 
-func registerAIImageRoutes(se *core.ServeEvent, app core.App) {
+func RegisterImageRoutes(se *core.ServeEvent, app core.App) {
 	// Catalog of image-capable providers (for UI pickers).
 	se.Router.GET("/api/ai/image-catalog", func(e *core.RequestEvent) error {
 		out := make([]map[string]any, 0, len(knownImageProviders))

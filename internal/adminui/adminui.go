@@ -1,4 +1,4 @@
-package main
+package adminui
 
 import (
 	_ "embed"
@@ -18,7 +18,7 @@ import (
 //go:embed admin_ui.html
 var adminUIHTML []byte
 
-func registerAdminUI(se *core.ServeEvent) {
+func RegisterAdmin(se *core.ServeEvent) {
 	se.Router.GET("/admin", func(e *core.RequestEvent) error {
 		e.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, err := e.Response.Write(adminUIHTML)
