@@ -33,8 +33,11 @@ func nextRole(role string) (string, bool) {
 // you can tune cadence and (critically) cap spend without a redeploy of behavior.
 type config struct {
 	enabled          bool
+	autoApprove      bool          // autopilot: auto-approve drafts + hand off (no human gate)
 	interval         time.Duration // tick cadence
 	maxTokens        int           // per-call output cap
+	maxToolSteps     int           // max generate↔tool round-trips for tool-enabled tasks
+	maxRevisions     int           // max rework passes per task after its first draft (0 = no rework)
 	dailyTokenBudget int           // 0 = unlimited; halts dispatch once reached
 	callTimeout      time.Duration
 	provider         string // default provider for seeded agents
@@ -44,8 +47,11 @@ type config struct {
 func configFromEnv() config {
 	return config{
 		enabled:          envBool("ORCH_ENABLED", true),
+		autoApprove:      envBool("ORCH_AUTO_APPROVE", false), // default OFF — autonomous spend is opt-in
 		interval:         envDuration("ORCH_INTERVAL", 15*time.Second),
 		maxTokens:        envInt("ORCH_MAX_TOKENS", 2000),
+		maxToolSteps:     envInt("ORCH_MAX_TOOL_STEPS", 5),
+		maxRevisions:     envInt("ORCH_MAX_REVISIONS", 3),
 		dailyTokenBudget: envInt("ORCH_DAILY_TOKEN_BUDGET", 200_000),
 		callTimeout:      envDuration("ORCH_CALL_TIMEOUT", 120*time.Second),
 		provider:         envStr("ORCH_PROVIDER", "anthropic"),
