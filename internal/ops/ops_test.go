@@ -10,9 +10,41 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
 
+	"base-app/internal/ai"
 	"base-app/internal/orchestrator"
 	"base-app/internal/provision"
 )
+
+func findTool(t *testing.T, tools []ai.Tool, name string) ai.Tool {
+	t.Helper()
+	for _, tl := range tools {
+		if tl.Name == name {
+			return tl
+		}
+	}
+	t.Fatalf("tool %q not found", name)
+	return ai.Tool{}
+}
+
+// ensureTestRBAC stands up minimal _permissions/_roles collections (the real ones
+// are created by the root roles.go at boot, which the test harness doesn't run).
+func ensureTestRBAC(t *testing.T, app core.App) {
+	t.Helper()
+	perms := core.NewBaseCollection("_permissions")
+	perms.System = true
+	perms.Fields.Add(&core.TextField{Name: "token", Required: true})
+	if err := app.Save(perms); err != nil {
+		t.Fatalf("create _permissions: %v", err)
+	}
+	roles := core.NewBaseCollection("_roles")
+	roles.System = true
+	roles.Fields.Add(&core.TextField{Name: "name", Required: true})
+	roles.Fields.Add(&core.TextField{Name: "description"})
+	roles.Fields.Add(&core.RelationField{Name: "permissions", CollectionId: perms.Id, MaxSelect: 50})
+	if err := app.Save(roles); err != nil {
+		t.Fatalf("create _roles: %v", err)
+	}
+}
 
 func setup(t *testing.T) *tests.TestApp {
 	t.Helper()
@@ -60,12 +92,9 @@ func TestSchemaIsProposedNotApplied(t *testing.T) {
 	app := setup(t)
 	task := opsTask(t, app)
 
-	tools := opsTools(app, task)
-	if len(tools) != 1 || tools[0].Name != "propose_schema" {
-		t.Fatalf("expected a propose_schema tool, got %#v", tools)
-	}
+	tool := findTool(t, opsTools(app, task), "propose_schema")
 	args := `{"collections":[{"name":"blog_posts","fields":[{"name":"title","type":"text"},{"name":"body","type":"text"}],"rbac":true}]}`
-	out, err := tools[0].Execute(context.Background(), json.RawMessage(args))
+	out, err := tool.Execute(context.Background(), json.RawMessage(args))
 	if err != nil {
 		t.Fatalf("propose_schema execute: %v", err)
 	}
@@ -99,6 +128,53 @@ func TestSchemaIsProposedNotApplied(t *testing.T) {
 	// rbac:true should have produced access rules via the shared provision core.
 	if col.CreateRule == nil {
 		t.Error("expected rbac create rule to be set")
+	}
+}
+
+// THE GUARD (role tool): manage_role must PROPOSE the role and NOT create it; the
+// executor creates the role + its permission tokens only on approval.
+func TestRoleIsProposedNotApplied(t *testing.T) {
+	app := setup(t)
+	ensureTestRBAC(t, app)
+	task := opsTask(t, app)
+
+	tool := findTool(t, opsTools(app, task), "manage_role")
+	args := `{"roleName":"support-readonly","description":"read support data","permissions":["orders:read","support_tickets:read"]}`
+	out, err := tool.Execute(context.Background(), json.RawMessage(args))
+	if err != nil {
+		t.Fatalf("manage_role execute: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(out), "queued") {
+		t.Errorf("expected a queued message, got: %s", out)
+	}
+	// Guard: no role created yet.
+	if _, err := app.FindFirstRecordByFilter(roleCollection, "name = {:n}", dbx.Params{"n": "support-readonly"}); err == nil {
+		t.Fatal("role was created at propose time — the guard failed")
+	}
+
+	// Executor (on approval) creates the role + permission tokens.
+	if _, err := executeManageRole(app, task, json.RawMessage(args)); err != nil {
+		t.Fatalf("executeManageRole: %v", err)
+	}
+	role, err := app.FindFirstRecordByFilter(roleCollection, "name = {:n}", dbx.Params{"n": "support-readonly"})
+	if err != nil {
+		t.Fatalf("role not created after executor: %v", err)
+	}
+	if got := len(role.GetStringSlice("permissions")); got != 2 {
+		t.Errorf("role permissions = %d, want 2", got)
+	}
+	// Both tokens exist as _permissions records.
+	for _, tok := range []string{"orders:read", "support_tickets:read"} {
+		if _, err := app.FindFirstRecordByFilter(permissionCollection, "token = {:t}", dbx.Params{"t": tok}); err != nil {
+			t.Errorf("permission token %q not created", tok)
+		}
+	}
+	// Re-running (upsert) must not duplicate the role.
+	if _, err := executeManageRole(app, task, json.RawMessage(args)); err != nil {
+		t.Fatalf("executeManageRole re-run: %v", err)
+	}
+	if n, _ := app.CountRecords(roleCollection, dbx.NewExp("name = {:n}", dbx.Params{"n": "support-readonly"})); n != 1 {
+		t.Errorf("role upsert duplicated: count=%d", n)
 	}
 }
 

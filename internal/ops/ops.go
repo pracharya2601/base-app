@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/core"
 
 	"base-app/internal/ai"
@@ -29,15 +30,24 @@ const (
 	RoleOps = "ops"
 	// ActionProvisionSchema is the proposed-action kind for a schema change.
 	ActionProvisionSchema = "provision_schema"
+	// ActionManageRole is the proposed-action kind for an RBAC role change.
+	ActionManageRole = "manage_role"
+
+	// RBAC system collections (the canonical machinery lives in the root roles.go;
+	// this package only does a minimal self-contained role upsert).
+	permissionCollection = "_permissions"
+	roleCollection       = "_roles"
 )
 
 const opsPersona = "You are a platform operations engineer for this PocketBase-based backend. Translate the " +
-	"operator's request into a concrete schema change and call the propose_schema tool with the collections to " +
-	"create or extend — each with a name and fields (type: text, number, bool, email, select, or relation), and " +
-	"rbac:true when the collection should get role-based access rules. The change does NOT apply immediately: " +
-	"propose_schema QUEUES it for human approval. After proposing, tell the operator in one sentence what you " +
-	"queued. Keep it minimal — do not invent fields or collections the operator didn't ask for. If the request " +
-	"isn't a schema change you can express, say so plainly instead of calling the tool."
+	"operator's request into concrete platform changes using your tools:\n" +
+	"- propose_schema: create or extend collections (fields of type text, number, bool, email, select, relation; " +
+	"rbac:true to auto-generate role-based access rules).\n" +
+	"- manage_role: create or update an access role and the permission tokens it grants " +
+	"(\"collection:action\", \"collection:*\", or \"*\").\n" +
+	"Tools do NOT apply immediately — they QUEUE the change for human approval. After proposing, tell the operator " +
+	"in one sentence what you queued. Keep it minimal — don't invent collections, fields, or permissions the " +
+	"operator didn't ask for. If the request isn't something your tools can express, say so plainly."
 
 // Register wires the ops function: seed the ops agent, register its tool, the
 // approval-time executor, and a trivial approve-action (which also makes ops tasks
@@ -49,6 +59,7 @@ func Register(app core.App) {
 	orchestrator.RegisterApproveAction(KindOpsCommand, opsApprove)
 	orchestrator.RegisterTaskTools(KindOpsCommand, opsTools)
 	orchestrator.RegisterActionExecutor(ActionProvisionSchema, executeProvision)
+	orchestrator.RegisterActionExecutor(ActionManageRole, executeManageRole)
 	app.Logger().Info("ops: agentic platform-ops function active")
 }
 
@@ -88,7 +99,98 @@ func opsTools(app core.App, task *core.Record) []ai.Tool {
 				return fmt.Sprintf("Queued a schema change for approval: %s. It will be applied once approved.",
 					strings.Join(names, ", ")), nil
 			}),
+		ai.NewTool(
+			"manage_role",
+			"Propose creating or updating an access ROLE and the permission tokens it grants. Does NOT apply "+
+				"immediately — it QUEUES the change for human approval. Tokens are \"collection:action\" "+
+				"(action = read|create|update|delete), \"collection:*\" for all actions on a collection, or \"*\" "+
+				"for full access.",
+			func(ctx context.Context, in struct {
+				RoleName    string   `json:"roleName" jsonschema:"description=The role name, e.g. support-readonly"`
+				Description string   `json:"description" jsonschema:"description=Optional human-readable description"`
+				Permissions []string `json:"permissions" jsonschema:"description=Permission tokens, e.g. [\"orders:read\",\"support_tickets:read\"]"`
+			}) (string, error) {
+				if task == nil {
+					return "", fmt.Errorf("no task context to attach the role proposal to")
+				}
+				if strings.TrimSpace(in.RoleName) == "" {
+					return "Provide a roleName.", nil
+				}
+				if err := orchestrator.ProposeAction(app, task.Id, ActionManageRole, map[string]any{
+					"roleName":    in.RoleName,
+					"description": in.Description,
+					"permissions": in.Permissions,
+				}); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("Queued a role change for approval: %q granting %d permission(s). Applies once approved.",
+					in.RoleName, len(in.Permissions)), nil
+			}),
 	}
+}
+
+// executeManageRole is the approval-time executor for a role change: find-or-create
+// the permission tokens, then upsert the role with that permission set. Minimal and
+// self-contained — the canonical RBAC machinery (hooks/backfill/seed) stays in the
+// root roles.go; if more RBAC ops are added, extract a shared internal/rbac core.
+func executeManageRole(app core.App, _ *core.Record, params json.RawMessage) (string, error) {
+	var p struct {
+		RoleName    string   `json:"roleName"`
+		Description string   `json:"description"`
+		Permissions []string `json:"permissions"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", fmt.Errorf("bad role params: %w", err)
+	}
+	if strings.TrimSpace(p.RoleName) == "" {
+		return "", fmt.Errorf("roleName is required")
+	}
+	ids := make([]string, 0, len(p.Permissions))
+	for _, tok := range p.Permissions {
+		if strings.TrimSpace(tok) == "" {
+			continue
+		}
+		id, err := findOrCreatePermissionID(app, tok)
+		if err != nil {
+			return "", err
+		}
+		ids = append(ids, id)
+	}
+	role, err := app.FindFirstRecordByFilter(roleCollection, "name = {:n}", dbx.Params{"n": p.RoleName})
+	if err != nil {
+		col, cerr := app.FindCollectionByNameOrId(roleCollection)
+		if cerr != nil {
+			return "", cerr
+		}
+		role = core.NewRecord(col)
+		role.Set("name", p.RoleName)
+	}
+	if p.Description != "" {
+		role.Set("description", p.Description)
+	}
+	role.Set("permissions", ids)
+	if err := app.Save(role); err != nil {
+		return "", fmt.Errorf("failed to save role %q: %w", p.RoleName, err)
+	}
+	return fmt.Sprintf("Role %q now grants: %s.", p.RoleName, strings.Join(p.Permissions, ", ")), nil
+}
+
+// findOrCreatePermissionID returns the _permissions record id for a token, creating
+// the record if it doesn't exist yet.
+func findOrCreatePermissionID(app core.App, token string) (string, error) {
+	if rec, err := app.FindFirstRecordByFilter(permissionCollection, "token = {:t}", dbx.Params{"t": token}); err == nil {
+		return rec.Id, nil
+	}
+	col, err := app.FindCollectionByNameOrId(permissionCollection)
+	if err != nil {
+		return "", err
+	}
+	rec := core.NewRecord(col)
+	rec.Set("token", token)
+	if err := app.Save(rec); err != nil {
+		return "", fmt.Errorf("failed to create permission %q: %w", token, err)
+	}
+	return rec.Id, nil
 }
 
 // executeProvision is the approval-time executor: it applies the proposed schema
