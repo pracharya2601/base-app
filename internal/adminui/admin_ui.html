@@ -262,6 +262,21 @@
       </div>
 
       <div class="card">
+        <div class="topbar"><h2 style="margin:0">Settings</h2><button class="ghost" id="orchCfgRefresh">Refresh</button></div>
+        <p class="sub" style="margin-top:6px">DB-driven config (system tenant). Saved values apply live on the next tick; interval applies on restart. Leave a number blank to use the env default.</p>
+        <div id="orchCfgMsg"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px">
+          <div class="field"><label>Provider</label><input id="cfgProvider" placeholder="anthropic"></div>
+          <div class="field"><label>Model</label><input id="cfgModel" placeholder="(provider default)"></div>
+          <div class="field"><label>Max tokens / call</label><input id="cfgMaxTokens" type="number" min="1"></div>
+          <div class="field"><label>Daily token budget</label><input id="cfgDailyBudget" type="number" min="1"></div>
+          <div class="field"><label>Max revisions</label><input id="cfgMaxRev" type="number" min="1"></div>
+          <div class="field"><label>Interval (seconds · restart)</label><input id="cfgInterval" type="number" min="1"></div>
+        </div>
+        <div class="row" style="margin-top:10px"><button id="orchCfgSave">Save settings</button></div>
+      </div>
+
+      <div class="card">
         <div class="topbar"><h2 style="margin:0">Tasks</h2>
           <div style="display:flex; gap:8px; align-items:center">
             <select id="orchFilter" style="width:auto">
@@ -356,7 +371,7 @@
     $("view-" + valid).classList.add("active");
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === valid));
     if (valid === "images") loadImages();
-    if (valid === "orchestrator") { loadOrchStatus(); loadOrchTasks(); }
+    if (valid === "orchestrator") { loadOrchStatus(); loadOrchConfig(); loadOrchTasks(); }
   }
   document.querySelectorAll(".nav a").forEach((a) => a.addEventListener("click", () => { location.hash = a.dataset.view; }));
   window.addEventListener("hashchange", route);
@@ -549,6 +564,35 @@
   }
 
   // ================= ORCHESTRATOR =================
+  async function loadOrchConfig() {
+    try {
+      const c = await api("/api/orchestrator/config");
+      $("cfgProvider").value = c.provider || "";
+      $("cfgModel").value = c.model || "";
+      $("cfgMaxTokens").value = c.maxTokens || "";
+      $("cfgDailyBudget").value = c.dailyTokenBudget || "";
+      $("cfgMaxRev").value = c.maxRevisions || "";
+      $("cfgInterval").value = c.intervalSeconds || "";
+    } catch (e) { /* tab may not be active */ }
+  }
+
+  async function saveOrchConfig() {
+    const numOf = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : undefined; };
+    const body = {
+      provider: $("cfgProvider").value || undefined,
+      model: $("cfgModel").value || undefined,
+      maxTokens: numOf("cfgMaxTokens"),
+      dailyTokenBudget: numOf("cfgDailyBudget"),
+      maxRevisions: numOf("cfgMaxRev"),
+      intervalSeconds: numOf("cfgInterval"),
+    };
+    try {
+      await api("/api/orchestrator/config", { method: "POST", body: JSON.stringify(body) });
+      msg($("orchCfgMsg"), "Saved — applies on the next tick.", "ok");
+      loadOrchConfig(); loadOrchStatus();
+    } catch (e) { msg($("orchCfgMsg"), "Save failed: " + e.message, "err"); }
+  }
+
   async function loadOrchStatus() {
     try {
       const s = await api("/api/orchestrator/status");
@@ -669,6 +713,8 @@
   $("mintBtn").onclick = mint;
   $("keysRefresh").onclick = loadKeys;
   $("orchStatusRefresh").onclick = loadOrchStatus;
+  $("orchCfgRefresh").onclick = loadOrchConfig;
+  $("orchCfgSave").onclick = saveOrchConfig;
   $("orchTasksRefresh").onclick = loadOrchTasks;
   $("orchFilter").onchange = loadOrchTasks;
 

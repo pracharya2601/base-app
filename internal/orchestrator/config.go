@@ -4,6 +4,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/pocketbase/pocketbase/core"
 )
 
 // Pipeline roles. v1 is a fixed software-delivery pipeline; each hop is gated by a
@@ -57,6 +59,66 @@ func configFromEnv() config {
 		provider:         envStr("ORCH_PROVIDER", "anthropic"),
 		model:            envStr("ORCH_MODEL", ""),
 	}
+}
+
+// loadOrchConfig returns the EFFECTIVE config for a tenant: the ORCH_* env
+// defaults overlaid with any per-tenant _orchConfigs row. This is what makes the
+// company DB-configurable at runtime (no redeploy) — the tick calls it every tick.
+//
+// Zero-vs-unset rules (the row's fields default to zero):
+//   - numbers/strings overlay only when SET (>0 / non-empty), so 0 means "use env";
+//   - `autopilot` (a bool, where 0==false is a real value) is AUTHORITATIVE once a
+//     row exists — its safe default is false, and the autopilot/config endpoints are
+//     what create the row, so this reads back exactly what was toggled;
+//   - `enabled` stays ENV-ONLY here — turning the whole loop off is an ops decision,
+//     not a per-tenant runtime toggle, and false-vs-unset can't be told apart.
+func loadOrchConfig(app core.App, ownerID string) config {
+	cfg := configFromEnv()
+	// FindFirstRecordByData (raw field match) handles owner=="" (the system tenant);
+	// the PB filter-string parser does not reliably match an empty-string param.
+	rec, err := app.FindFirstRecordByData(configCollection, "owner", ownerID)
+	if err != nil || rec == nil {
+		return cfg
+	}
+	cfg.autoApprove = rec.GetBool("autopilot")
+	if v := rec.GetInt("intervalSeconds"); v > 0 {
+		cfg.interval = time.Duration(v) * time.Second
+	}
+	if v := rec.GetInt("maxTokens"); v > 0 {
+		cfg.maxTokens = v
+	}
+	if v := rec.GetInt("maxRevisions"); v > 0 {
+		cfg.maxRevisions = v
+	}
+	if v := rec.GetInt("dailyTokenBudget"); v > 0 {
+		cfg.dailyTokenBudget = v
+	}
+	if v := rec.GetString("provider"); v != "" {
+		cfg.provider = v
+	}
+	if v := rec.GetString("model"); v != "" {
+		cfg.model = v
+	}
+	return cfg
+}
+
+// upsertOrchConfig creates or updates a tenant's _orchConfigs row, applying the
+// given field setters. The owner-unique index keeps it one row per tenant.
+func upsertOrchConfig(app core.App, ownerID string, apply func(*core.Record)) (*core.Record, error) {
+	rec, err := app.FindFirstRecordByData(configCollection, "owner", ownerID)
+	if err != nil || rec == nil {
+		col, cerr := app.FindCollectionByNameOrId(configCollection)
+		if cerr != nil {
+			return nil, cerr
+		}
+		rec = core.NewRecord(col)
+		rec.Set("owner", ownerID)
+	}
+	apply(rec)
+	if err := app.Save(rec); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 func envStr(key, def string) string {

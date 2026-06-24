@@ -168,9 +168,10 @@ func RegisterRoutes(se *core.ServeEvent, app core.App) {
 		})
 	}).Bind(apis.RequireSuperuserAuth())
 
-	// Toggle autopilot live (no restart): when on, the loop auto-approves drafts
-	// and chains the pipeline autonomously. Spends without a human gate — the daily
-	// token budget remains the ceiling.
+	// Toggle autopilot live (no restart): persisted to _orchConfigs so the tick
+	// (which re-reads config every tick) picks it up. When on, the loop auto-approves
+	// drafts and chains the pipeline autonomously — the daily token budget remains
+	// the ceiling, and action-kind tasks (e.g. support replies) still need approval.
 	se.Router.POST("/api/orchestrator/autopilot", func(e *core.RequestEvent) error {
 		var body struct {
 			Enabled bool `json:"enabled"`
@@ -178,13 +179,81 @@ func RegisterRoutes(se *core.ServeEvent, app core.App) {
 		if err := e.BindBody(&body); err != nil {
 			return e.BadRequestError("invalid request body", err)
 		}
-		autopilot.Store(body.Enabled)
+		if _, err := upsertOrchConfig(app, SystemOwner, func(r *core.Record) {
+			r.Set("autopilot", body.Enabled)
+		}); err != nil {
+			return e.InternalServerError("failed to save autopilot setting", err)
+		}
 		return e.JSON(http.StatusOK, map[string]any{"autopilot": body.Enabled})
+	}).Bind(apis.RequireSuperuserAuth())
+
+	// Read the effective config (env defaults overlaid with the _orchConfigs row).
+	se.Router.GET("/api/orchestrator/config", func(e *core.RequestEvent) error {
+		cfg := loadOrchConfig(app, SystemOwner)
+		return e.JSON(http.StatusOK, map[string]any{
+			"autopilot":        cfg.autoApprove,
+			"intervalSeconds":  int(cfg.interval.Seconds()),
+			"maxTokens":        cfg.maxTokens,
+			"maxRevisions":     cfg.maxRevisions,
+			"dailyTokenBudget": cfg.dailyTokenBudget,
+			"provider":         cfg.provider,
+			"model":            cfg.model,
+			"enabled":          cfg.enabled,
+			"note":             "Edits apply live on the next tick; intervalSeconds applies on restart. enabled is env-only (ORCH_ENABLED).",
+		})
+	}).Bind(apis.RequireSuperuserAuth())
+
+	// Update the DB-driven config (system tenant). Only provided (non-null) fields
+	// are written, so it's a partial update; the tick reads the result next tick.
+	se.Router.POST("/api/orchestrator/config", func(e *core.RequestEvent) error {
+		var body struct {
+			Autopilot        *bool   `json:"autopilot"`
+			IntervalSeconds  *int    `json:"intervalSeconds"`
+			MaxTokens        *int    `json:"maxTokens"`
+			MaxRevisions     *int    `json:"maxRevisions"`
+			DailyTokenBudget *int    `json:"dailyTokenBudget"`
+			Provider         *string `json:"provider"`
+			Model            *string `json:"model"`
+		}
+		if err := e.BindBody(&body); err != nil {
+			return e.BadRequestError("invalid request body", err)
+		}
+		if _, err := upsertOrchConfig(app, SystemOwner, func(r *core.Record) {
+			if body.Autopilot != nil {
+				r.Set("autopilot", *body.Autopilot)
+			}
+			if body.IntervalSeconds != nil {
+				r.Set("intervalSeconds", *body.IntervalSeconds)
+			}
+			if body.MaxTokens != nil {
+				r.Set("maxTokens", *body.MaxTokens)
+			}
+			if body.MaxRevisions != nil {
+				r.Set("maxRevisions", *body.MaxRevisions)
+			}
+			if body.DailyTokenBudget != nil {
+				r.Set("dailyTokenBudget", *body.DailyTokenBudget)
+			}
+			if body.Provider != nil {
+				r.Set("provider", *body.Provider)
+			}
+			if body.Model != nil {
+				r.Set("model", *body.Model)
+			}
+		}); err != nil {
+			return e.InternalServerError("failed to save config", err)
+		}
+		cfg := loadOrchConfig(app, SystemOwner)
+		return e.JSON(http.StatusOK, map[string]any{
+			"autopilot": cfg.autoApprove, "maxTokens": cfg.maxTokens, "maxRevisions": cfg.maxRevisions,
+			"dailyTokenBudget": cfg.dailyTokenBudget, "provider": cfg.provider, "model": cfg.model,
+			"intervalSeconds": int(cfg.interval.Seconds()),
+		})
 	}).Bind(apis.RequireSuperuserAuth())
 
 	// Live status: task counts by state, agent roster, and budget usage.
 	se.Router.GET("/api/orchestrator/status", func(e *core.RequestEvent) error {
-		cfg := configFromEnv()
+		cfg := loadOrchConfig(app, SystemOwner)
 		counts := map[string]int{}
 		for _, s := range taskStates {
 			n, _ := app.CountRecords(taskCollection, dbx.NewExp("state = {:s}", dbx.Params{"s": s}))
@@ -200,7 +269,7 @@ func RegisterRoutes(se *core.ServeEvent, app core.App) {
 		used := tokensUsedSince(app, "", nowMinus24h())
 		return e.JSON(http.StatusOK, map[string]any{
 			"enabled":          cfg.enabled,
-			"autopilot":        autopilot.Load(),
+			"autopilot":        cfg.autoApprove,
 			"intervalSeconds":  int(cfg.interval.Seconds()),
 			"tasks":            counts,
 			"agents":           roster,

@@ -199,12 +199,21 @@ func ensureRuns(app core.App, tasks, agents *core.Collection) error {
 // default, which the tick treats as "fall through to the ORCH_* env default" — so a
 // row's mere existence costs nothing until a field is set. Idempotent.
 func ensureOrchestratorConfigs(app core.App) error {
-	if _, err := app.FindCollectionByNameOrId(configCollection); err == nil {
+	if c, err := app.FindCollectionByNameOrId(configCollection); err == nil {
+		// Migration: slice 1 made `owner` Required, but the system tenant's owner is
+		// "" — which the Required rule rejects, blocking the system config row. Relax
+		// it so the DB-driven config can be stored for the system tenant.
+		if f, ok := c.Fields.GetByName("owner").(*core.TextField); ok && f.Required {
+			f.Required = false
+			if err := app.Save(c); err != nil {
+				app.Logger().Warn("orchestrator: could not relax _orchConfigs.owner required flag", "err", err)
+			}
+		}
 		return nil
 	}
 	c := core.NewBaseCollection(configCollection)
 	c.System = true
-	c.Fields.Add(&core.TextField{Name: "owner", Required: true}) // tenant id (one row per tenant)
+	c.Fields.Add(&core.TextField{Name: "owner"}) // tenant id (one row per tenant); "" = system tenant
 	c.Fields.Add(&core.BoolField{Name: "enabled"})
 	c.Fields.Add(&core.BoolField{Name: "autopilot"})
 	c.Fields.Add(&core.NumberField{Name: "intervalSeconds"})

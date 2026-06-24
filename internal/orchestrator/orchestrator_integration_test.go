@@ -185,16 +185,33 @@ func TestAdvanceTaskEndOfPipeline(t *testing.T) {
 	}
 }
 
-func TestAutopilotToggle(t *testing.T) {
-	autopilot.Store(false)
-	if autopilot.Load() {
-		t.Fatal("expected off")
+// Config is DB-driven: loadOrchConfig overlays the _orchConfigs row on the env
+// defaults. autopilot is authoritative once a row exists; numbers/strings overlay
+// only when set.
+func TestConfigIsDBDriven(t *testing.T) {
+	app := newTestApp(t)
+	if err := EnsureSchema(app); err != nil {
+		t.Fatalf("EnsureSchema: %v", err)
 	}
-	autopilot.Store(true)
-	if !autopilot.Load() {
-		t.Fatal("expected on")
+	if loadOrchConfig(app, SystemOwner).autoApprove {
+		t.Fatal("expected autopilot off by default (no row)")
 	}
-	autopilot.Store(false) // reset so other tests aren't affected
+	if _, err := upsertOrchConfig(app, SystemOwner, func(r *core.Record) { r.Set("autopilot", true) }); err != nil {
+		t.Fatalf("upsert autopilot: %v", err)
+	}
+	if !loadOrchConfig(app, SystemOwner).autoApprove {
+		t.Fatal("expected autopilot on after upsert")
+	}
+	if _, err := upsertOrchConfig(app, SystemOwner, func(r *core.Record) {
+		r.Set("maxTokens", 1234)
+		r.Set("provider", "openai")
+	}); err != nil {
+		t.Fatalf("upsert overlay: %v", err)
+	}
+	c := loadOrchConfig(app, SystemOwner)
+	if c.maxTokens != 1234 || c.provider != "openai" || !c.autoApprove {
+		t.Errorf("overlay failed: maxTokens=%d provider=%s autopilot=%v", c.maxTokens, c.provider, c.autoApprove)
+	}
 }
 
 // revisionPrompt must carry BOTH the prior draft and the feedback, and demand the
@@ -254,7 +271,7 @@ func TestRevisionsSoFar(t *testing.T) {
 // The spend guard: a revision attempt past the cap must FAIL the task without an
 // LLM call (processTask returns before ai.Generate, so no run is logged).
 func TestProcessTaskRevisionCapFailsWithoutLLM(t *testing.T) {
-	autopilot.Store(false) // guard: this test asserts the needs_review branch
+	// config{} below has autoApprove=false, so the needs_review branch is asserted.
 	app := newTestApp(t)
 	if err := EnsureSchema(app); err != nil {
 		t.Fatalf("EnsureSchema: %v", err)

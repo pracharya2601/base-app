@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"github.com/pocketbase/dbx"
@@ -13,24 +12,19 @@ import (
 	"base-app/internal/ai"
 )
 
-// autopilot is the runtime auto-approve switch. When true, the loop auto-approves
-// each draft and hands it to the next role instead of stopping at needs_review —
-// so the whole backlog runs autonomously. Initialized from ORCH_AUTO_APPROVE and
-// flippable live via POST /api/orchestrator/autopilot (no restart). The daily
-// token budget remains the hard cost ceiling regardless.
-var autopilot atomic.Bool
-
 // Start launches the always-on orchestrator loop in a background goroutine and
-// returns immediately. The loop ticks on cfg.interval for the lifetime of the
-// process; each tick advances AT MOST one task (a deliberate cost throttle). It
-// only spends when there is pending work AND the daily budget has room.
+// returns immediately. The loop ticks on the interval for the lifetime of the
+// process; each tick advances AT MOST one task (a deliberate cost throttle) and
+// re-reads the per-tenant config from the DB, so autopilot/budget/model edits take
+// effect live (no restart). It only spends when there is pending work AND the
+// daily budget has room. (Interval itself is fixed at boot; changing it needs a
+// restart.)
 func Start(app core.App) {
-	cfg := configFromEnv()
+	cfg := loadOrchConfig(app, SystemOwner)
 	if !cfg.enabled {
 		app.Logger().Info("orchestrator: disabled (ORCH_ENABLED=false)")
 		return
 	}
-	autopilot.Store(cfg.autoApprove)
 	app.Logger().Info("orchestrator: started",
 		"interval", cfg.interval.String(), "dailyTokenBudget", cfg.dailyTokenBudget,
 		"autopilot", cfg.autoApprove)
@@ -39,20 +33,22 @@ func Start(app core.App) {
 		ticker := time.NewTicker(cfg.interval)
 		defer ticker.Stop()
 		for range ticker.C {
-			tickSafe(app, cfg)
+			tickSafe(app)
 		}
 	}()
 }
 
 // tickSafe wraps one tick in a panic recover so a single bad task can never kill
 // the always-on loop.
-func tickSafe(app core.App, cfg config) {
+func tickSafe(app core.App) {
 	defer func() {
 		if r := recover(); r != nil {
 			app.Logger().Error("orchestrator: tick panicked", "err", r)
 		}
 	}()
-	tick(app, cfg)
+	// Re-read config each tick so live edits (autopilot, budget, provider/model)
+	// apply without a restart.
+	tick(app, loadOrchConfig(app, SystemOwner))
 }
 
 func tick(app core.App, cfg config) {
@@ -136,7 +132,7 @@ func processTask(app core.App, cfg config, task *core.Record) {
 	// Action-kind tasks (e.g. a support reply) always stop for human approval, even
 	// under autopilot — approving them has a real side effect (emailing a customer),
 	// so a human must sign off. Only the draft-only software pipeline auto-advances.
-	if autopilot.Load() && !HasApproveAction(task.GetString("kind")) {
+	if cfg.autoApprove && !HasApproveAction(task.GetString("kind")) {
 		// Close the loop: if a reviewer asked for changes, send the work back to its
 		// author to revise instead of shipping it. When the gate handles the task,
 		// we're done for this tick.
