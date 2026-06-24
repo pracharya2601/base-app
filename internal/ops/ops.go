@@ -32,11 +32,14 @@ const (
 	ActionProvisionSchema = "provision_schema"
 	// ActionManageRole is the proposed-action kind for an RBAC role change.
 	ActionManageRole = "manage_role"
+	// ActionAssignUserRoles is the proposed-action kind for assigning roles to a user.
+	ActionAssignUserRoles = "assign_user_roles"
 
 	// RBAC system collections (the canonical machinery lives in the root roles.go;
 	// this package only does a minimal self-contained role upsert).
 	permissionCollection = "_permissions"
 	roleCollection       = "_roles"
+	userCollection       = "users"
 )
 
 const opsPersona = "You are a platform operations engineer for this PocketBase-based backend. Translate the " +
@@ -45,6 +48,7 @@ const opsPersona = "You are a platform operations engineer for this PocketBase-b
 	"rbac:true to auto-generate role-based access rules).\n" +
 	"- manage_role: create or update an access role and the permission tokens it grants " +
 	"(\"collection:action\", \"collection:*\", or \"*\").\n" +
+	"- assign_user_roles: set which roles a user (by email or id) has; the roles must already exist.\n" +
 	"Tools do NOT apply immediately — they QUEUE the change for human approval. After proposing, tell the operator " +
 	"in one sentence what you queued. Keep it minimal — don't invent collections, fields, or permissions the " +
 	"operator didn't ask for. If the request isn't something your tools can express, say so plainly."
@@ -60,6 +64,7 @@ func Register(app core.App) {
 	orchestrator.RegisterTaskTools(KindOpsCommand, opsTools)
 	orchestrator.RegisterActionExecutor(ActionProvisionSchema, executeProvision)
 	orchestrator.RegisterActionExecutor(ActionManageRole, executeManageRole)
+	orchestrator.RegisterActionExecutor(ActionAssignUserRoles, executeAssignUserRoles)
 	app.Logger().Info("ops: agentic platform-ops function active")
 }
 
@@ -126,7 +131,85 @@ func opsTools(app core.App, task *core.Record) []ai.Tool {
 				return fmt.Sprintf("Queued a role change for approval: %q granting %d permission(s). Applies once approved.",
 					in.RoleName, len(in.Permissions)), nil
 			}),
+		ai.NewTool(
+			"assign_user_roles",
+			"Propose assigning access roles (by name) to a user, identified by email or id. Does NOT apply "+
+				"immediately — it QUEUES the change for human approval. The roles must already exist (create them "+
+				"with manage_role first). This SETS the user's roles to exactly the list given.",
+			func(ctx context.Context, in struct {
+				UserEmail string   `json:"userEmail" jsonschema:"description=The user's email address"`
+				UserID    string   `json:"userId" jsonschema:"description=The user's record id (alternative to email)"`
+				Roles     []string `json:"roles" jsonschema:"description=Role names to assign, e.g. [\"support-readonly\"]"`
+			}) (string, error) {
+				if task == nil {
+					return "", fmt.Errorf("no task context to attach the assignment proposal to")
+				}
+				if strings.TrimSpace(in.UserEmail) == "" && strings.TrimSpace(in.UserID) == "" {
+					return "Identify the user by email or id.", nil
+				}
+				if err := orchestrator.ProposeAction(app, task.Id, ActionAssignUserRoles, map[string]any{
+					"userEmail": in.UserEmail,
+					"userId":    in.UserID,
+					"roles":     in.Roles,
+				}); err != nil {
+					return "", err
+				}
+				who := in.UserEmail
+				if who == "" {
+					who = in.UserID
+				}
+				return fmt.Sprintf("Queued a role assignment for approval: %s -> [%s]. Applies once approved.",
+					who, strings.Join(in.Roles, ", ")), nil
+			}),
 	}
+}
+
+// executeAssignUserRoles is the approval-time executor: resolve the user and the
+// named roles, then SET the user's roles to exactly that set. Runs only on approval.
+func executeAssignUserRoles(app core.App, _ *core.Record, params json.RawMessage) (string, error) {
+	var p struct {
+		UserEmail string   `json:"userEmail"`
+		UserID    string   `json:"userId"`
+		Roles     []string `json:"roles"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", fmt.Errorf("bad assignment params: %w", err)
+	}
+	var (
+		user *core.Record
+		err  error
+	)
+	switch {
+	case strings.TrimSpace(p.UserID) != "":
+		user, err = app.FindRecordById(userCollection, p.UserID)
+	case strings.TrimSpace(p.UserEmail) != "":
+		user, err = app.FindFirstRecordByFilter(userCollection, "email = {:e}", dbx.Params{"e": p.UserEmail})
+	default:
+		return "", fmt.Errorf("provide userEmail or userId")
+	}
+	if err != nil || user == nil {
+		return "", fmt.Errorf("user not found")
+	}
+	ids := make([]string, 0, len(p.Roles))
+	for _, name := range p.Roles {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		role, rerr := app.FindFirstRecordByFilter(roleCollection, "name = {:n}", dbx.Params{"n": name})
+		if rerr != nil {
+			return "", fmt.Errorf("role %q not found — create it first", name)
+		}
+		ids = append(ids, role.Id)
+	}
+	user.Set("roles", ids)
+	if err := app.Save(user); err != nil {
+		return "", fmt.Errorf("failed to set user roles: %w", err)
+	}
+	who := p.UserEmail
+	if who == "" {
+		who = user.Id
+	}
+	return fmt.Sprintf("User %s now has roles: %s.", who, strings.Join(p.Roles, ", ")), nil
 }
 
 // executeManageRole is the approval-time executor for a role change: find-or-create

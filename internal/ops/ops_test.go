@@ -44,6 +44,28 @@ func ensureTestRBAC(t *testing.T, app core.App) {
 	if err := app.Save(roles); err != nil {
 		t.Fatalf("create _roles: %v", err)
 	}
+	// The real app's migrateAndSeedRBAC adds users.roles; mirror it for assign tests.
+	if users, err := app.FindCollectionByNameOrId(userCollection); err == nil && users.Fields.GetByName("roles") == nil {
+		users.Fields.Add(&core.RelationField{Name: "roles", CollectionId: roles.Id, MaxSelect: 20})
+		if err := app.Save(users); err != nil {
+			t.Fatalf("add users.roles: %v", err)
+		}
+	}
+}
+
+func newUser(t *testing.T, app core.App, email string) *core.Record {
+	t.Helper()
+	col, err := app.FindCollectionByNameOrId(userCollection)
+	if err != nil {
+		t.Fatalf("users collection: %v", err)
+	}
+	u := core.NewRecord(col)
+	u.Set("email", email)
+	u.SetPassword("password123")
+	if err := app.Save(u); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	return u
 }
 
 func setup(t *testing.T) *tests.TestApp {
@@ -175,6 +197,52 @@ func TestRoleIsProposedNotApplied(t *testing.T) {
 	}
 	if n, _ := app.CountRecords(roleCollection, dbx.NewExp("name = {:n}", dbx.Params{"n": "support-readonly"})); n != 1 {
 		t.Errorf("role upsert duplicated: count=%d", n)
+	}
+}
+
+// THE GUARD (assign tool): assign_user_roles must PROPOSE and not change the user;
+// the executor sets the user's roles only on approval (and errors on unknown roles).
+func TestAssignUserRolesIsProposedNotApplied(t *testing.T) {
+	app := setup(t)
+	ensureTestRBAC(t, app)
+	user := newUser(t, app, "alice@example.com")
+	// A role to assign.
+	task := opsTask(t, app)
+	if _, err := executeManageRole(app, task, json.RawMessage(`{"roleName":"support-readonly","permissions":["orders:read"]}`)); err != nil {
+		t.Fatalf("seed role: %v", err)
+	}
+
+	tool := findTool(t, opsTools(app, task), "assign_user_roles")
+	args := `{"userEmail":"alice@example.com","roles":["support-readonly"]}`
+	out, err := tool.Execute(context.Background(), json.RawMessage(args))
+	if err != nil {
+		t.Fatalf("assign_user_roles execute: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(out), "queued") {
+		t.Errorf("expected a queued message, got: %s", out)
+	}
+	// Guard: user has no roles yet.
+	user, _ = app.FindRecordById(userCollection, user.Id)
+	if len(user.GetStringSlice("roles")) != 0 {
+		t.Fatal("user roles changed at propose time — the guard failed")
+	}
+
+	// Executor (on approval) assigns the role.
+	if _, err := executeAssignUserRoles(app, task, json.RawMessage(args)); err != nil {
+		t.Fatalf("executeAssignUserRoles: %v", err)
+	}
+	user, _ = app.FindRecordById(userCollection, user.Id)
+	if got := len(user.GetStringSlice("roles")); got != 1 {
+		t.Errorf("user roles = %d, want 1", got)
+	}
+
+	// Unknown role -> error (and the user is untouched by that attempt).
+	if _, err := executeAssignUserRoles(app, task, json.RawMessage(`{"userEmail":"alice@example.com","roles":["does-not-exist"]}`)); err == nil {
+		t.Error("expected an error assigning a non-existent role")
+	}
+	// Unknown user -> error.
+	if _, err := executeAssignUserRoles(app, task, json.RawMessage(`{"userEmail":"nobody@example.com","roles":["support-readonly"]}`)); err == nil {
+		t.Error("expected an error for unknown user")
 	}
 }
 
