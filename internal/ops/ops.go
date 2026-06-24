@@ -34,6 +34,8 @@ const (
 	ActionManageRole = "manage_role"
 	// ActionAssignUserRoles is the proposed-action kind for assigning roles to a user.
 	ActionAssignUserRoles = "assign_user_roles"
+	// ActionSeedRecords is the proposed-action kind for inserting records.
+	ActionSeedRecords = "seed_records"
 
 	// RBAC system collections (the canonical machinery lives in the root roles.go;
 	// this package only does a minimal self-contained role upsert).
@@ -49,6 +51,7 @@ const opsPersona = "You are a platform operations engineer for this PocketBase-b
 	"- manage_role: create or update an access role and the permission tokens it grants " +
 	"(\"collection:action\", \"collection:*\", or \"*\").\n" +
 	"- assign_user_roles: set which roles a user (by email or id) has; the roles must already exist.\n" +
+	"- seed_records: insert records into an existing collection.\n" +
 	"Tools do NOT apply immediately — they QUEUE the change for human approval. After proposing, tell the operator " +
 	"in one sentence what you queued. Keep it minimal — don't invent collections, fields, or permissions the " +
 	"operator didn't ask for. If the request isn't something your tools can express, say so plainly."
@@ -65,6 +68,7 @@ func Register(app core.App) {
 	orchestrator.RegisterActionExecutor(ActionProvisionSchema, executeProvision)
 	orchestrator.RegisterActionExecutor(ActionManageRole, executeManageRole)
 	orchestrator.RegisterActionExecutor(ActionAssignUserRoles, executeAssignUserRoles)
+	orchestrator.RegisterActionExecutor(ActionSeedRecords, executeSeedRecords)
 	app.Logger().Info("ops: agentic platform-ops function active")
 }
 
@@ -161,7 +165,53 @@ func opsTools(app core.App, task *core.Record) []ai.Tool {
 				return fmt.Sprintf("Queued a role assignment for approval: %s -> [%s]. Applies once approved.",
 					who, strings.Join(in.Roles, ", ")), nil
 			}),
+		ai.NewTool(
+			"seed_records",
+			"Propose inserting records into an EXISTING collection. Does NOT apply immediately — it QUEUES the "+
+				"insert for human approval. Each record is a map of field name to value.",
+			func(ctx context.Context, in struct {
+				Collection string           `json:"collection" jsonschema:"description=Target collection name (must already exist)"`
+				Records    []map[string]any `json:"records" jsonschema:"description=Records to insert; each is a field->value object"`
+			}) (string, error) {
+				if task == nil {
+					return "", fmt.Errorf("no task context to attach the seed proposal to")
+				}
+				if strings.TrimSpace(in.Collection) == "" || len(in.Records) == 0 {
+					return "Provide a collection and at least one record.", nil
+				}
+				if err := orchestrator.ProposeAction(app, task.Id, ActionSeedRecords, map[string]any{
+					"collection": in.Collection,
+					"records":    in.Records,
+				}); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("Queued %d record(s) to insert into %s for approval. Applies once approved.",
+					len(in.Records), in.Collection), nil
+			}),
 	}
+}
+
+// executeSeedRecords is the approval-time executor: insert the proposed records via
+// the shared provision core (reuses provision.Apply's Seed path — no new write
+// logic). Surfaces a missing target collection as an error.
+func executeSeedRecords(app core.App, _ *core.Record, params json.RawMessage) (string, error) {
+	var p struct {
+		Collection string           `json:"collection"`
+		Records    []map[string]any `json:"records"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return "", fmt.Errorf("bad seed params: %w", err)
+	}
+	if strings.TrimSpace(p.Collection) == "" {
+		return "", fmt.Errorf("collection is required")
+	}
+	res, err := provision.Apply(app, provision.Spec{
+		Seed: map[string][]map[string]any{p.Collection: p.Records},
+	})
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("Inserted %d record(s) into %s.", res.RecordsSeeded[p.Collection], p.Collection), nil
 }
 
 // executeAssignUserRoles is the approval-time executor: resolve the user and the

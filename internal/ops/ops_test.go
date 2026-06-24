@@ -246,6 +246,46 @@ func TestAssignUserRolesIsProposedNotApplied(t *testing.T) {
 	}
 }
 
+// THE GUARD (seed tool): seed_records must PROPOSE and not insert; the executor
+// inserts only on approval, and errors when the target collection is missing.
+func TestSeedRecordsIsProposedNotApplied(t *testing.T) {
+	app := setup(t)
+	// A target collection to seed into.
+	col := core.NewBaseCollection("notes")
+	col.Fields.Add(&core.TextField{Name: "text"})
+	if err := app.Save(col); err != nil {
+		t.Fatalf("create notes: %v", err)
+	}
+	task := opsTask(t, app)
+
+	tool := findTool(t, opsTools(app, task), "seed_records")
+	args := `{"collection":"notes","records":[{"text":"hello"},{"text":"world"}]}`
+	out, err := tool.Execute(context.Background(), json.RawMessage(args))
+	if err != nil {
+		t.Fatalf("seed_records execute: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(out), "queued") {
+		t.Errorf("expected a queued message, got: %s", out)
+	}
+	// Guard: nothing inserted yet.
+	if n, _ := app.CountRecords("notes"); n != 0 {
+		t.Fatalf("records inserted at propose time — guard failed (n=%d)", n)
+	}
+
+	// Executor (on approval) inserts the records.
+	if _, err := executeSeedRecords(app, task, json.RawMessage(args)); err != nil {
+		t.Fatalf("executeSeedRecords: %v", err)
+	}
+	if n, _ := app.CountRecords("notes"); n != 2 {
+		t.Errorf("notes count = %d, want 2", n)
+	}
+
+	// Missing target collection -> error (so approval stays open).
+	if _, err := executeSeedRecords(app, task, json.RawMessage(`{"collection":"nope","records":[{"x":1}]}`)); err == nil {
+		t.Error("expected an error seeding a non-existent collection")
+	}
+}
+
 // executeProvision surfaces bad params as an error (so approval stays open).
 func TestExecuteProvisionBadParams(t *testing.T) {
 	app := setup(t)
