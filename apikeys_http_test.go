@@ -8,6 +8,8 @@ import (
 
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tests"
+
+	"base-app/internal/provision"
 )
 
 // HTTP-level tests for apiKeyAuthMiddleware — the actual request path that splits
@@ -122,7 +124,7 @@ func setupMiddlewareApp(t testing.TB) *tests.TestApp {
 	// the create hook isn't registered in this harness.
 	memos := core.NewBaseCollection("memos")
 	memos.Fields.Add(&core.TextField{Name: "title"})
-	applyRules(memos, rbacRules("memos"))
+	provision.ApplyRules(memos, provision.RBACRules("memos"))
 	if err := app.Save(memos); err != nil {
 		t.Fatalf("save memos: %v", err)
 	}

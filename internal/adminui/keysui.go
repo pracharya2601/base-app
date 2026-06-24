@@ -6,11 +6,11 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// The standalone API-key admin page has been folded into the unified console
-// (admin_ui.html, served at GET /admin). This route is kept only to redirect the
-// old URL into the console's API-keys section, so existing links/bookmarks work.
+// API-key management currently lives in the classic console (/admin/classic); the
+// new SPA at /admin doesn't host it yet. This route redirects the old URL (and the
+// SPA's "API Keys" link) to the classic console's keys section.
 func RegisterKeys(se *core.ServeEvent) {
 	se.Router.GET("/admin/apikeys", func(e *core.RequestEvent) error {
-		return e.Redirect(http.StatusFound, "/admin#keys")
+		return e.Redirect(http.StatusFound, "/admin/classic#keys")
 	})
 }

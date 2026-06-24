@@ -58,6 +58,9 @@
   .msg { padding:11px 13px; border-radius:var(--radius); margin-bottom:14px; font-size:13px; }
   .msg.err { background:color-mix(in srgb, var(--danger), transparent 88%); border:1px solid var(--danger); color:var(--danger); }
   .msg.ok  { background:color-mix(in srgb, var(--success), transparent 88%); border:1px solid var(--success); color:var(--success); }
+  .msg.warn { background:color-mix(in srgb, var(--warning), transparent 88%); border:1px solid var(--warning); color:var(--warning); }
+  .pill.done { color:var(--success); border-color:var(--success); }
+  .pill.pending { color:var(--warning); border-color:var(--warning); }
   .keyout { background:color-mix(in srgb, var(--warning), transparent 92%); border:1px solid var(--warning); border-radius:var(--radius); padding:16px; margin-bottom:16px; }
   .keyout code { display:block; word-break:break-all; font-size:13px; color:var(--txt); margin:10px 0; font-family:var(--monoFont); }
   .keyout .warn { color:var(--warning); font-size:13px; margin:8px 0 0; }
@@ -130,6 +133,8 @@
       <a data-view="providers"><span class="ico">✦</span> AI Providers</a>
       <a data-view="images"><span class="ico">🖼</span> Images</a>
       <a data-view="keys"><span class="ico">⚿</span> API Keys</a>
+      <a data-view="orchestrator"><span class="ico">🤖</span> Orchestrator</a>
+      <a data-view="data"><span class="ico">▦</span> Data</a>
     </nav>
     <div class="sidefoot">
       <div class="who" id="whoami">—</div>
@@ -247,6 +252,79 @@
       </div>
     </section>
 
+    <!-- ============ ORCHESTRATOR ============ -->
+    <section class="section" id="view-orchestrator">
+      <h1>Orchestrator</h1>
+      <p class="sub">The always-on AI agent company — live status, the task queue, agent drafts, and human approvals.</p>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Status</h2><button class="ghost" id="orchStatusRefresh">Refresh</button></div>
+        <div id="orchStatus" style="margin-top:12px">—</div>
+      </div>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Settings</h2><button class="ghost" id="orchCfgRefresh">Refresh</button></div>
+        <p class="sub" style="margin-top:6px">DB-driven config (system tenant). Saved values apply live on the next tick; interval applies on restart. Leave a number blank to use the env default.</p>
+        <div id="orchCfgMsg"></div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px">
+          <div class="field"><label>Provider</label><input id="cfgProvider" placeholder="anthropic"></div>
+          <div class="field"><label>Model</label><input id="cfgModel" placeholder="(provider default)"></div>
+          <div class="field"><label>Max tokens / call</label><input id="cfgMaxTokens" type="number" min="1"></div>
+          <div class="field"><label>Daily token budget</label><input id="cfgDailyBudget" type="number" min="1"></div>
+          <div class="field"><label>Max revisions</label><input id="cfgMaxRev" type="number" min="1"></div>
+          <div class="field"><label>Interval (seconds · restart)</label><input id="cfgInterval" type="number" min="1"></div>
+        </div>
+        <div class="row" style="margin-top:10px"><button id="orchCfgSave">Save settings</button></div>
+      </div>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Ops command</h2></div>
+        <p class="sub" style="margin-top:6px">Tell the platform what to do in plain English — e.g. "add a blog_posts collection with title, body, and a relation to authors, rbac on", "create a support-readonly role that can read orders and support_tickets", or "make alice@example.com a support-readonly user". The ops agent drafts the change (schema, role, role assignment, or seed records) and <strong>queues it for your approval</strong> — nothing is applied until you approve it below in Tasks.</p>
+        <div id="opsMsg"></div>
+        <div class="field"><textarea id="opsInput" rows="3" placeholder="Describe the change you want…"></textarea></div>
+        <div class="row"><button id="opsSend">Ask the ops agent</button></div>
+      </div>
+
+      <div class="card">
+        <div class="topbar"><h2 style="margin:0">Tasks</h2>
+          <div style="display:flex; gap:8px; align-items:center">
+            <select id="orchFilter" style="width:auto">
+              <option value="">all states</option>
+              <option value="pending">pending</option>
+              <option value="working">working</option>
+              <option value="needs_review">needs_review</option>
+              <option value="rejected">rejected</option>
+              <option value="done">done</option>
+              <option value="failed">failed</option>
+            </select>
+            <button class="ghost" id="orchTasksRefresh">Refresh</button>
+          </div>
+        </div>
+        <table style="margin-top:8px"><thead>
+          <tr><th>Title</th><th>Role / Agent</th><th>State</th><th>Draft</th><th>Updated</th><th></th></tr>
+        </thead><tbody id="orchTasksBody"></tbody></table>
+      </div>
+
+      <div class="card hidden" id="orchDetail"></div>
+    </section>
+
+    <!-- ============ DATA (read-only) ============ -->
+    <section class="section" id="view-data">
+      <h1>Data</h1>
+      <p class="sub">Read-only browse of your collections — so you never need the PocketBase dashboard to look at records. To <em>change</em> data, use the Ops command box (Orchestrator) or the records API.</p>
+      <div class="card">
+        <div class="topbar">
+          <h2 style="margin:0">Records</h2>
+          <div style="display:flex; gap:8px; align-items:center">
+            <select id="dataCollection" style="width:auto"><option value="">choose a collection…</option></select>
+            <button class="ghost" id="dataRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="dataMsg" style="margin-top:8px"></div>
+        <div id="dataTable" style="margin-top:8px; overflow:auto"></div>
+      </div>
+    </section>
+
   </div></main>
 </div>
 
@@ -261,6 +339,14 @@
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[c]));
   const msg = (el, text, kind) => { el.innerHTML = text ? `<div class="msg ${kind}">${esc(text)}</div>` : ""; };
   const yn  = (v) => `<span class="pill ${v?'yes':'no'}">${v?'yes':'no'}</span>`;
+  // Render a proposed action's JSON params as a readable "key: value, …" summary.
+  const summarizeParams = (raw) => {
+    try {
+      const p = JSON.parse(raw || "{}");
+      const s = Object.entries(p).map(([k, v]) => `${esc(k)}: ${esc(String(v))}`).join(", ");
+      return s || "<span style='color:var(--txtHint)'>(no params)</span>";
+    } catch { return esc(raw || ""); }
+  };
 
   async function api(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
@@ -306,11 +392,13 @@
   // ---------- sidebar routing ----------
   function route() {
     const view = (location.hash || "#providers").replace("#", "");
-    const valid = ["providers", "images", "keys"].includes(view) ? view : "providers";
+    const valid = ["providers", "images", "keys", "orchestrator", "data"].includes(view) ? view : "providers";
     document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
     $("view-" + valid).classList.add("active");
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === valid));
     if (valid === "images") loadImages();
+    if (valid === "orchestrator") { loadOrchStatus(); loadOrchConfig(); loadOrchTasks(); }
+    if (valid === "data") loadDataCollections();
   }
   document.querySelectorAll(".nav a").forEach((a) => a.addEventListener("click", () => { location.hash = a.dataset.view; }));
   window.addEventListener("hashchange", route);
@@ -502,6 +590,195 @@
     catch (e) { msg($("listMsg"), "Revoke failed: " + e.message, "err"); }
   }
 
+  // ================= ORCHESTRATOR =================
+  async function sendOpsCommand() {
+    const text = $("opsInput").value.trim();
+    if (!text) { msg($("opsMsg"), "Type a request first.", "err"); return; }
+    const title = text.length > 60 ? text.slice(0, 57) + "…" : text;
+    try {
+      await api("/api/orchestrator/tasks", {
+        method: "POST",
+        body: JSON.stringify({ role: "ops", kind: "ops_command", title: title, description: text }),
+      });
+      msg($("opsMsg"), "Queued. The ops agent will draft a schema change and stop for your approval — watch Tasks below (needs_review), then open it to review the proposed change.", "ok");
+      $("opsInput").value = "";
+      loadOrchTasks();
+    } catch (e) { msg($("opsMsg"), "Failed: " + e.message, "err"); }
+  }
+
+  // ---------- Data (read-only browse) ----------
+  let dataCollections = [];
+  async function loadDataCollections() {
+    try {
+      const r = await api("/api/collections?perPage=200");
+      dataCollections = r.items || [];
+      const sel = $("dataCollection"), cur = sel.value;
+      sel.innerHTML = '<option value="">choose a collection…</option>' +
+        dataCollections.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}${c.system ? " (system)" : ""}</option>`).join("");
+      if (cur) sel.value = cur;
+    } catch (e) { msg($("dataMsg"), "Load failed: " + e.message, "err"); }
+  }
+  async function loadDataRecords() {
+    const name = $("dataCollection").value;
+    if (!name) { $("dataTable").innerHTML = ""; msg($("dataMsg"), "", ""); return; }
+    try {
+      const r = await api(`/api/collections/${encodeURIComponent(name)}/records?perPage=50&sort=-created`);
+      const items = r.items || [];
+      const col = dataCollections.find((c) => c.name === name);
+      let cols = ["id"];
+      if (col && col.fields) cols = cols.concat(col.fields.map((f) => f.name).filter((n) => n !== "password" && n !== "tokenKey"));
+      if (!items.length) { $("dataTable").innerHTML = `<p class="sub">No records.</p>`; msg($("dataMsg"), "", ""); return; }
+      const head = cols.map((c) => `<th>${esc(c)}</th>`).join("");
+      const rows = items.map((it) => "<tr>" + cols.map((c) => {
+        let v = it[c];
+        if (v === undefined || v === null) v = "";
+        else if (typeof v === "object") v = JSON.stringify(v);
+        else v = String(v);
+        if (v.length > 80) v = v.slice(0, 77) + "…";
+        return `<td>${esc(v)}</td>`;
+      }).join("") + "</tr>").join("");
+      $("dataTable").innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+      const more = r.totalItems > items.length ? ` (showing first 50 of ${r.totalItems})` : "";
+      msg($("dataMsg"), `${items.length} record(s)${more}`, "ok");
+    } catch (e) { $("dataTable").innerHTML = ""; msg($("dataMsg"), "Load failed: " + e.message, "err"); }
+  }
+
+  async function loadOrchConfig() {
+    try {
+      const c = await api("/api/orchestrator/config");
+      $("cfgProvider").value = c.provider || "";
+      $("cfgModel").value = c.model || "";
+      $("cfgMaxTokens").value = c.maxTokens || "";
+      $("cfgDailyBudget").value = c.dailyTokenBudget || "";
+      $("cfgMaxRev").value = c.maxRevisions || "";
+      $("cfgInterval").value = c.intervalSeconds || "";
+    } catch (e) { /* tab may not be active */ }
+  }
+
+  async function saveOrchConfig() {
+    const numOf = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : undefined; };
+    const body = {
+      provider: $("cfgProvider").value || undefined,
+      model: $("cfgModel").value || undefined,
+      maxTokens: numOf("cfgMaxTokens"),
+      dailyTokenBudget: numOf("cfgDailyBudget"),
+      maxRevisions: numOf("cfgMaxRev"),
+      intervalSeconds: numOf("cfgInterval"),
+    };
+    try {
+      await api("/api/orchestrator/config", { method: "POST", body: JSON.stringify(body) });
+      msg($("orchCfgMsg"), "Saved — applies on the next tick.", "ok");
+      loadOrchConfig(); loadOrchStatus();
+    } catch (e) { msg($("orchCfgMsg"), "Save failed: " + e.message, "err"); }
+  }
+
+  async function loadOrchStatus() {
+    try {
+      const s = await api("/api/orchestrator/status");
+      const counts = s.tasks || {};
+      const order = ["pending", "working", "needs_review", "rejected", "done", "failed"];
+      const chips = order.filter((k) => k in counts).map((k) => `<span class="pill">${k}: ${counts[k]}</span>`).join(" ");
+      const roster = (s.agents || []).map((a) => `${esc(a.name)} <span class="pill ${a.status === "active" ? "yes" : "no"}">${esc(a.role)} / ${esc(a.status)}</span>`).join("&nbsp;&nbsp;");
+      $("orchStatus").innerHTML = `
+        <div class="row">
+          <div class="field"><label>Enabled</label><div>${yn(s.enabled)}</div></div>
+          <div class="field"><label>Autopilot</label><div>${yn(s.autopilot)} <button class="ghost" id="apToggle" style="margin-left:8px; height:auto; padding:4px 10px">${s.autopilot ? "Turn off" : "Turn on"}</button></div></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Tokens today / budget</label><div>${s.tokensUsedToday} / ${s.dailyTokenBudget || "∞"}</div></div>
+          <div class="field"><label>Interval</label><div>${s.intervalSeconds}s</div></div>
+          <div class="field"><label>Max revisions</label><div>${s.maxRevisions}</div></div>
+        </div>
+        <div class="field"><label>Tasks</label><div>${chips || "—"}</div></div>
+        <div class="field"><label>Pipeline</label><div>${(s.pipeline || []).map(esc).join(" → ") || "—"}</div></div>
+        <div class="field"><label>Agents</label><div>${roster || "—"}</div></div>`;
+      $("apToggle").onclick = async () => {
+        if (!s.autopilot && !confirm("Turn autopilot ON? The loop will auto-approve drafts and spend tokens autonomously (bounded by the daily budget).")) return;
+        try { await api("/api/orchestrator/autopilot", { method: "POST", body: JSON.stringify({ enabled: !s.autopilot }) }); loadOrchStatus(); }
+        catch (e) { alert("Toggle failed: " + e.message); }
+      };
+    } catch (e) { $("orchStatus").innerHTML = `<div class="msg err">${esc(e.message)}</div>`; }
+  }
+
+  async function loadOrchTasks() {
+    const st = $("orchFilter").value;
+    try {
+      const { items } = await api("/api/orchestrator/tasks" + (st ? "?state=" + encodeURIComponent(st) : ""));
+      $("orchTasksBody").innerHTML = (items || []).map((t) => `
+        <tr><td>${esc(t.title)}</td><td>${esc(t.role || "")} / ${esc(t.agent || "")}</td>
+        <td><span class="pill">${esc(t.state)}</span></td><td>${t.hasOutput ? "✓" : ""}</td>
+        <td>${esc((t.updated || "").slice(0, 19))}</td>
+        <td><button class="ghost" data-id="${esc(t.id)}" style="height:auto; padding:4px 10px">View</button></td></tr>`).join("") || `<tr><td colspan="6" style="color:var(--txtHint)">No tasks</td></tr>`;
+      $("orchTasksBody").querySelectorAll("button[data-id]").forEach((b) => (b.onclick = () => openTask(b.dataset.id)));
+    } catch (e) { $("orchTasksBody").innerHTML = `<tr><td colspan="6"><div class="msg err">${esc(e.message)}</div></td></tr>`; }
+  }
+
+  async function openTask(id) {
+    try {
+      const d = await api("/api/orchestrator/tasks/" + id);
+      const t = d.task || {};
+      const runs = (d.runs || []).map((r) => `<tr><td>${esc(r.status || "")}</td><td>${esc(r.provider || "")} ${esc(r.model || "")}</td><td>${r.totalTokens || 0}</td><td>${r.durationMs || 0}ms</td></tr>`).join("") || `<tr><td colspan="4" style="color:var(--txtHint)">—</td></tr>`;
+      const lineage = (d.lineage || []).map((l) => `<span class="pill">${esc(l.role || "")}: ${esc(l.title)}</span>`).join(" → ");
+
+      // Proposed actions: side effects (e.g. a refund) the agent queued while
+      // drafting. "proposed" ones EXECUTE on approve, so surface them loudly.
+      const proposals = d.proposedActions || [];
+      const pending = proposals.filter((p) => p.status === "proposed");
+      let proposalsHtml = "";
+      if (proposals.length) {
+        const rows = proposals.map((p) => {
+          const cls = p.status === "proposed" ? "pending" : (p.status === "executed" ? "done" : "no");
+          const res = p.result ? ` <span style="color:var(--txtHint)">(${esc(p.result)})</span>` : "";
+          return `<li><span class="pill ${cls}">${esc(p.status)}</span> <strong>${esc(p.actionKind)}</strong> — ${summarizeParams(p.params)}${res}</li>`;
+        }).join("");
+        const head = pending.length
+          ? `⚠ Approving this task will execute ${pending.length} pending action(s):`
+          : `Proposed actions:`;
+        proposalsHtml = `<div class="field"><label>Proposed actions</label><div class="msg ${pending.length ? "warn" : ""}" style="margin-bottom:0">${head}<ul style="margin:8px 0 0; padding-left:18px">${rows}</ul></div></div>`;
+      }
+
+      let actions = "";
+      if (t.state === "needs_review") {
+        const warnLine = pending.length
+          ? `<p style="color:var(--warning); font-size:13px; margin:8px 0 0">⚠ Approving will also execute the ${pending.length} pending action(s) above (e.g. a refund). Revise and Reject discard them.</p>`
+          : "";
+        actions = `
+          <div class="field"><label>Feedback (for revise / reject)</label><textarea id="orchFeedback" rows="2" placeholder="What needs to change?"></textarea></div>
+          <div class="row">
+            <button id="orchApprove">${pending.length ? "Approve → run actions" : "Approve → hand off"}</button>
+            <button class="ghost" id="orchRevise">Revise</button>
+            <button class="danger" id="orchReject">Reject</button>
+          </div>
+          ${warnLine}
+          <p class="sub" style="margin-top:8px">Approve and Revise spend tokens on the next tick (an LLM call). Reject is terminal and free.</p>`;
+      }
+      $("orchDetail").innerHTML = `
+        <div class="topbar"><h2 style="margin:0">${esc(t.title)}</h2><button class="ghost" id="orchClose" style="height:auto; padding:4px 10px">Close</button></div>
+        <div class="field"><label>State</label><div><span class="pill">${esc(t.state)}</span> &nbsp; ${esc(t.role || "")} / ${esc(t.agent || "")}</div></div>
+        ${lineage ? `<div class="field"><label>Lineage</label><div>${lineage}</div></div>` : ""}
+        ${t.errorMsg ? `<div class="field"><label>Feedback / error</label><div class="msg err">${esc(t.errorMsg)}</div></div>` : ""}
+        <div class="field"><label>Draft output</label><pre>${esc(t.output || "—")}</pre></div>
+        ${proposalsHtml}
+        <div class="field"><label>Runs</label><table><thead><tr><th>Status</th><th>Model</th><th>Tokens</th><th>Time</th></tr></thead><tbody>${runs}</tbody></table></div>
+        ${actions}`;
+      show($("orchDetail"));
+      $("orchDetail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      $("orchClose").onclick = () => hide($("orchDetail"));
+      if (t.state === "needs_review") {
+        $("orchApprove").onclick = () => orchAction(id, "approve", {});
+        $("orchRevise").onclick = () => orchAction(id, "revise", { feedback: $("orchFeedback").value });
+        $("orchReject").onclick = () => orchAction(id, "reject", { feedback: $("orchFeedback").value });
+      }
+    } catch (e) { alert("Load failed: " + e.message); }
+  }
+
+  async function orchAction(id, action, body) {
+    try {
+      await api(`/api/orchestrator/tasks/${id}/${action}`, { method: "POST", body: JSON.stringify(body) });
+      hide($("orchDetail")); loadOrchTasks(); loadOrchStatus();
+    } catch (e) { alert(action + " failed: " + e.message); }
+  }
+
   // ---------- wire up ----------
   $("loginBtn").onclick = login;
   $("password").addEventListener("keydown", (e) => { if (e.key === "Enter") login(); });
@@ -514,6 +791,14 @@
   $("imgRefresh").onclick = loadImages;
   $("mintBtn").onclick = mint;
   $("keysRefresh").onclick = loadKeys;
+  $("orchStatusRefresh").onclick = loadOrchStatus;
+  $("orchCfgRefresh").onclick = loadOrchConfig;
+  $("orchCfgSave").onclick = saveOrchConfig;
+  $("opsSend").onclick = sendOpsCommand;
+  $("orchTasksRefresh").onclick = loadOrchTasks;
+  $("dataCollection").onchange = loadDataRecords;
+  $("dataRefresh").onclick = () => { loadDataCollections().then(loadDataRecords); };
+  $("orchFilter").onchange = loadOrchTasks;
 
   // ---------- bootstrap: reuse the dashboard (/_/) superuser session ----------
   function discoverDashboardToken() {

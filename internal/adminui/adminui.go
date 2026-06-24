@@ -1,27 +1,49 @@
 package adminui
 
 import (
-	_ "embed"
+	"embed"
+	"io/fs"
 
+	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// Unified admin console: a single page with sidebar navigation over BOTH the
-// API-key manager and the AI-provider manager (+ a proxy test box), served at
-// GET /admin. Same self-contained, single-binary, no-secrets approach as
-// keysui.go / aiui.go: it logs in as a superuser CLIENT-SIDE (reusing the /_/
-// dashboard session when present) and calls the same superuser-gated endpoints.
+// The /admin console is now a Vite+Svelte SPA (source in ../frontend, built into
+// ./spa via `npm run build`) embedded into the binary and served here. It looks
+// native (reuses PocketBase's design tokens) and logs in CLIENT-SIDE as a
+// superuser, calling the same superuser-gated endpoints as before. The single
+// binary, no-secrets approach is unchanged — only the frontend toolchain is new.
 //
-// The older standalone pages (/admin/apikeys, /admin/ai) still work for
-// back-compat; this is the combined home.
+// Routing avoids colliding with the standalone /admin/ai and /admin/apikeys pages:
+//   GET /admin                  -> SPA index.html
+//   GET /admin/assets/{path...} -> hashed JS/CSS bundles
+//   GET /admin/classic          -> the previous single-file console (fallback)
+//
+// NB: spa/ is committed (built output) so `go build` works without running npm; the
+// Dockerfile rebuilds it fresh.
+
+//go:embed all:spa
+var spaFS embed.FS
 
 //go:embed admin_ui.html
-var adminUIHTML []byte
+var classicHTML []byte
 
 func RegisterAdmin(se *core.ServeEvent) {
+	index, _ := spaFS.ReadFile("spa/index.html")
 	se.Router.GET("/admin", func(e *core.RequestEvent) error {
 		e.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, err := e.Response.Write(adminUIHTML)
+		_, err := e.Response.Write(index)
+		return err
+	})
+
+	if assets, err := fs.Sub(spaFS, "spa/assets"); err == nil {
+		se.Router.GET("/admin/assets/{path...}", apis.Static(assets, false))
+	}
+
+	// The previous single-file console, kept reachable during the migration.
+	se.Router.GET("/admin/classic", func(e *core.RequestEvent) error {
+		e.Response.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, err := e.Response.Write(classicHTML)
 		return err
 	})
 }

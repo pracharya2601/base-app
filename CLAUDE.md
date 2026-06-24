@@ -46,7 +46,11 @@ main.go calls. (Note: the root core is `package main` and so CANNOT be imported 
 shared helpers a feature needs must live in the feature pkg or a shared package.)
 
 ROOT (package main) — the platform core:
-main.go              framework entry: OnServe wiring, provision endpoint, field-type catalog (registerProvisionRoutes)
+main.go              framework entry: OnServe wiring; blockDashboardMiddleware (BLOCK_PB_DASHBOARD=1 → redirect /_/ to /admin so operators only use the unified console; /api/* incl. auth stay open); provision endpoint is now a thin wrapper over internal/provision.Apply (maps spec errors→400, save errors→500); field-type catalog (registerProvisionRoutes)
+
+internal/provision/ (package provision) — the importable core of superadmin provisioning, extracted out of package main so BOTH the HTTP endpoint AND in-process callers (the agentic ops executor) share one implementation. Exports Spec/CollectionSpec/FieldSpec/Rules (with jsonschema tags for tool use), Apply(app, Spec)->Result, ApplyRules, RBACRules, and InvalidSpecError (→400 vs 500). roles.go + apikeys_http_test.go now call provision.ApplyRules/RBACRules.
+
+internal/ops/ (package ops) — the agentic ADMIN function: state intent in /admin → an "ops" agent (Ozzy) proposes a platform change behind the approval guard → human approves to apply. Tools (all PROPOSE; executor runs on approve only): propose_schema (over provision.CollectionSpec → provision.Apply), manage_role (create/upsert an RBAC role + its permission tokens), assign_user_roles (set a user's roles by email/id; roles must exist), and seed_records (insert records into an existing collection — reuses provision.Apply's Seed). The RBAC ones are minimal self-contained _roles/_permissions/users upserts; the canonical RBAC machinery stays in roles.go. Registered via the orchestrator seams (RegisterTaskTools/RegisterApproveAction/RegisterActionExecutor), zero engine edits. This is the path to "run everything from /admin via the agentic system": new admin capabilities = new tools the ops agent proposes.
 apikeys.go           API-key system: _apiKeys system collection, scopes, auth middleware, throttled last-used stamp
 roles.go             user RBAC: _roles + _permissions system collections, native-rule enforcement
 serviceaccounts.go   _serviceAccounts auth collection; the roled identity an API key acts as on data routes
@@ -59,9 +63,29 @@ internal/ai/ (package ai) — the AI proxy feature, self-contained:
   airatelimit_test.go  rate-limiter + env unit tests
 
 internal/adminui/ (package adminui) — the admin console, self-contained:
-  adminui.go         unified /admin console (embeds admin_ui.html); exports RegisterAdmin
-  admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session)
-  keysui.go / aiui.go  thin redirects /admin/apikeys, /admin/ai; export RegisterKeys / RegisterAIUI
+  adminui.go         serves the /admin SPA: GET /admin -> spa/index.html, /admin/assets/{path...} -> embedded JS/CSS (apis.Static), /admin/classic -> the old single-file console (fallback). Embeds spa/ (committed build output) + admin_ui.html.
+  spa/               COMMITTED Vite+Svelte build output (from ../frontend). Committed so `go build` works without npm; the Dockerfile rebuilds it fresh (node stage).
+  admin_ui.html      the CLASSIC single-file console (now at /admin/classic) — still hosts AI Providers / Images / API Keys tabs not yet ported to the SPA; hash-routed (#providers/#keys/…).
+  keysui.go / aiui.go  /admin/apikeys, /admin/ai -> redirect to /admin/classic#keys / #providers (where those tabs live until ported)
+
+frontend/ (Vite + Svelte SOURCE for the /admin SPA — NOT package main) — replaces the hand-maintained HTML string. `cd frontend && npm install && npm run build` outputs to internal/adminui/spa (vite base=/admin/). Native look via theme.css (PocketBase design tokens, copied from admin_ui.html). FULLY ported views (src/views/): Orchestrator (status + autopilot toggle + Settings/DB-config panel + Ops command box + task queue + detail with proposed-actions + approve/revise/reject), Data (read-only collection/records browse), Providers (catalog + table + save form + test/stream box), Images (generate + gallery), Keys (mint w/ scopes+roles + table + revoke). The classic console (/admin/classic) is now superseded (kept only as a fallback, no longer linked). lib/api.js = fetch wrapper + superuser login (token in sessionStorage). After editing frontend/, rebuild (`npm run build`) + commit the regenerated spa/.
+
+internal/orchestrator/ (package orchestrator) — the "AI agent company":
+  schema.go          _agents/_tasks/_runs system collections (+ owner field for multi-tenancy; _tasks.kind for action dispatch) + _orchConfigs (per-tenant config overrides, owner-keyed) + _proposedActions (write-tool side effects awaiting approval) + SeedTeam/SeedTeamForOwner (PM/engineer/reviewer; per-tenant idempotent) + SeedAgent. Multi-tenancy slice 1 = data model only; tick still global (owner="" = legacy/system tenant)
+  orchestrator.go    always-on tick loop: claim a pending task, run its agent via ai.Generate, draft -> needs_review, log a _run; daily token-budget guard; self-correcting rework loop (re-queued task carries prior draft + feedback, capped by ORCH_MAX_REVISIONS); in autopilot a reviewer "VERDICT: CHANGES_REQUESTED" auto-sends work back to the author (autopilotReviewGate/parseVerdict) instead of shipping it; terminal failure (no retry-drain)
+  config.go          env knobs (ORCH_ENABLED/INTERVAL/MAX_TOKENS/MAX_TOOL_STEPS/MAX_REVISIONS/DAILY_TOKEN_BUDGET/PROVIDER/MODEL) + the role pipeline (nextRole) + DB-DRIVEN CONFIG: loadOrchConfig(app, owner) overlays the per-tenant _orchConfigs row on the env defaults (tick re-reads every tick → live edits, no restart), upsertOrchConfig writes it. autopilot now lives in _orchConfigs (not an in-memory global); numbers/strings overlay only when set, enabled stays env-only. Lookup uses FindFirstRecordByData (matches owner="" — the PB filter-string parser doesn't).
+  routes.go          superuser routes: POST tasks, tasks/{id}/approve (advance + hand off to next role), /revise (rework with feedback), /reject; POST autopilot (persists to _orchConfigs); GET+POST config (read/partial-update the DB-driven config); GET status, GET tasks (list, filter by state/agent/role, paginated), GET tasks/{id} (detail: draft + parent lineage + runs + proposedActions)
+  actions.go         THE GENERALIZATION SEAM that turns the engine from a fixed software pipeline into a generic "company function" runner. A `kind` on each task selects behavior: kind="" = the software pipeline (linear handoff); a registered kind runs its ApproveAction on approve INSTEAD of a handoff and is never auto-advanced under autopilot (human must approve real side effects). THREE registries: RegisterApproveAction(kind, fn) (what approve DOES) + RegisterTaskTools(kind, provider) (tools the agent may CALL while drafting — goai auto tool loop via ai.GenerateWithTools, gated by ORCH_MAX_TOOL_STEPS) + RegisterActionExecutor(actionKind, fn) (runs a PROPOSED side effect on approval). WRITE-TOOL GUARD: a mutating tool calls ProposeAction(...) to record an intended side effect in _proposedActions instead of acting mid-draft; on APPROVE the engine runs every pending proposal (executeProposedActions) before the ApproveAction; on REJECT/REVISE they're discarded. So mutations stay behind the human gate. Also exports EnqueueTask, HasApproveAction, HasTaskTools, SeedAgent. Engine never imports the feature pkg — it calls back through registered funcs.
+  *_test.go          unit (pipeline/config/action-registry) + integration (schema/seed + approve-handoff via ApiScenario)
+
+internal/support/ (package support) — the FIRST real "company function" on the engine: autonomous customer support (NOT coding). Self-contained, plugs in via the actions.go seam, does not modify the engine:
+  support.go         support_tickets collection (public-create contact form; budget guard backstops spend) + seeded "support" agent. TRIGGER: new ticket -> EnqueueTask(kind=support_reply) with the customer msg + their recent-ticket history as context. STATE MIRROR: a _tasks update hook reflects task state onto the ticket (drafting/awaiting_approval/resolved). APPROVE-ACTION (sendReply): approving the drafted reply emails it (PB SMTP if configured, else records it) + resolves the ticket. The agent drafts; a human approves; the action makes it real. This is the template future functions (orders/bookings) copy.
+  support_orders.go  the agent's abilities: an `orders` collection + a READ tool lookup_orders (queries orders by customerEmail) AND a WRITE tool issue_refund — registered for support_reply via RegisterTaskTools. issue_refund does NOT mutate: it PROPOSES a refund (orchestrator.ProposeAction) so it only runs when a human approves the reply; executeRefund (RegisterActionExecutor) does the real mutation (order->refunded) on approval. The draft runs goai's auto tool loop. Demo orders seeded only when SUPPORT_SEED_DEMO is set (prod DB stays clean).
+  *_test.go          integration: ticket trigger -> task, state mirror, approve-action resolves ticket; lookup_orders query + tool Execute + registry
+
+internal/bookings/ (package bookings) — the SECOND "company function", built to prove the template generalizes: an appointment/booking desk. Uses ONLY the engine's exported seams with ZERO changes to internal/orchestrator (a new function = a new package + ~4 lines in main.go). booking_requests + bookings collections, seeded "scheduler" agent. TRIGGER: new request -> EnqueueTask(kind=booking_reply). Tools: check_availability (READ, capacity vs existing bookings) + confirm_booking (WRITE — proposes via ProposeAction, refuses full dates). APPROVE-ACTION sends the reply; the proposed booking's executor CREATES a bookings record on approval only (vs support's write-tool which UPDATES). State mirror like support.
+
+internal/ai/generate.go  ai.Generate / ai.GenerateWithTools(...) — in-process LLM call (no HTTP) the orchestrator uses; the WithTools variant runs goai's auto tool loop. Re-exports ai.Tool + ai.NewTool[In] so feature pkgs define tools without importing goai.
 
 INFRA & TOOLING:
 Dockerfile           multi-stage: Go build (golang:1.25) -> alpine + Litestream
@@ -74,7 +98,7 @@ scripts/mint-apikey.sh  mint a scoped, revocable API key for a service client (e
 mcp/main.go          MCP server: 9 tools (incl. agentic RBAC: list_roles, manage_role, assign_user_roles)
 .mcp.json            project-scoped MCP config (Claude Code / Desktop)
 pocketbase-types.ts  generated frontend types (regenerate after schema changes)
-test-superadmin-api.sh  raw-curl walkthrough of the superuser API
+scripts/test-superadmin-api.sh  raw-curl walkthrough of the superuser API
 pb_hooks/main.pb.js  (unused in framework mode — JSVM plugin not registered)
 ```
 
@@ -118,7 +142,7 @@ Rebuild MCP after editing `mcp/`: `cd mcp && go build -o pb-mcp .` then restart 
 | POST | `/api/ai/{provider}/image` | image gen (openai/google/vertex/azure) → stored file + preview URL |
 | GET | `/api/ai/catalog` · `/api/ai/image-catalog` · `/api/ai/providers` | provider allowlist · image-capable · usable-now |
 | GET | `/api/ai/limits` | caller's rate/quota usage vs ceilings |
-| GET | `/admin` | unified console (AI Providers + Images + API Keys) |
+| GET | `/admin` | unified console (AI Providers + Images + API Keys + Orchestrator) |
 
 Provider keys live in the `_aiProviders` system collection, AES-encrypted at rest
 by a save-hook (reuses `PB_ENCRYPTION_KEY`); manage via `/admin` or the records
@@ -244,7 +268,7 @@ Regenerate after any schema change. `select` → TS union enums, `relation` → 
 
 - [x] ~~Swap MinIO for real S3~~ — MinIO removed; `LITESTREAM_*` now come from `.env`. Point them at real S3 in prod.
 - [x] ~~Move the MCP password out of `.mcp.json`~~ — now uses a scoped `PB_API_KEY` (mint with `scripts/mint-apikey.sh`); treat the filled-in key as a secret, don't commit it.
-- [ ] Enable PocketBase `--encryptionEnv` so the settings blob (SMTP/S3 creds) isn't plaintext in the DB.
+- [x] ~~Enable PocketBase `--encryptionEnv` so the settings blob (SMTP/S3 creds) isn't plaintext in the DB.~~ — `entrypoint.sh` passes `--encryptionEnv=PB_ENCRYPTION_KEY` when the key is set (settings blob) and the AI proxy encrypts provider keys with the same key; a boot-time guard in `main.go` (`encryptionKeyStatus`) logs a loud WARNING if the key is missing/malformed so prod can't silently store secrets in plaintext. **Set a 32-char `PB_ENCRYPTION_KEY` in prod.**
 - [ ] Put PocketBase behind TLS.
 - [x] ~~Per-collection API-key access~~ — done via RBAC: keys are roled service accounts gated by native per-collection rules (`docs/RBAC.md`). Scopes remain the *control-plane* gate only.
 - [ ] Decide whether `viewer`/`editor` should auto-cover NEW collections (`*:<action>` wildcard tokens) or stay explicit per-collection.
