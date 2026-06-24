@@ -46,7 +46,11 @@ main.go calls. (Note: the root core is `package main` and so CANNOT be imported 
 shared helpers a feature needs must live in the feature pkg or a shared package.)
 
 ROOT (package main) — the platform core:
-main.go              framework entry: OnServe wiring, provision endpoint, field-type catalog (registerProvisionRoutes)
+main.go              framework entry: OnServe wiring; provision endpoint is now a thin wrapper over internal/provision.Apply (maps spec errors→400, save errors→500); field-type catalog (registerProvisionRoutes)
+
+internal/provision/ (package provision) — the importable core of superadmin provisioning, extracted out of package main so BOTH the HTTP endpoint AND in-process callers (the agentic ops executor) share one implementation. Exports Spec/CollectionSpec/FieldSpec/Rules (with jsonschema tags for tool use), Apply(app, Spec)->Result, ApplyRules, RBACRules, and InvalidSpecError (→400 vs 500). roles.go + apikeys_http_test.go now call provision.ApplyRules/RBACRules.
+
+internal/ops/ (package ops) — the agentic ADMIN function: state intent in /admin → an "ops" agent (Ozzy) proposes a platform change behind the approval guard → human approves to apply. First capability: propose_schema (NewTool over provision.CollectionSpec) which ProposeAction(kind=provision_schema); executor calls provision.Apply on approval. Registered via the orchestrator seams (RegisterTaskTools/RegisterApproveAction/RegisterActionExecutor), zero engine edits. This is the path to "run everything from /admin via the agentic system": new admin capabilities = new tools the ops agent proposes.
 apikeys.go           API-key system: _apiKeys system collection, scopes, auth middleware, throttled last-used stamp
 roles.go             user RBAC: _roles + _permissions system collections, native-rule enforcement
 serviceaccounts.go   _serviceAccounts auth collection; the roled identity an API key acts as on data routes
@@ -60,7 +64,7 @@ internal/ai/ (package ai) — the AI proxy feature, self-contained:
 
 internal/adminui/ (package adminui) — the admin console, self-contained:
   adminui.go         unified /admin console (embeds admin_ui.html); exports RegisterAdmin
-  admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session). Tabs: AI Providers, Images, API Keys, Orchestrator (status + task queue + draft/lineage/runs detail + proposed-actions panel [pending write-tool side effects, e.g. a refund, shown loudly before approve] + approve/revise/reject + autopilot toggle, over the GET/POST /api/orchestrator/* endpoints)
+  admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session). Tabs: AI Providers, Images, API Keys, Orchestrator (status + Settings panel [DB-driven config] + Ops command box [plain-English → ops agent proposes a schema change for approval] + task queue + draft/lineage/runs detail + proposed-actions panel [pending write-tool side effects, e.g. a refund or schema change, shown loudly before approve] + approve/revise/reject + autopilot toggle, over the GET/POST /api/orchestrator/* endpoints)
   keysui.go / aiui.go  thin redirects /admin/apikeys, /admin/ai; export RegisterKeys / RegisterAIUI
 
 internal/orchestrator/ (package orchestrator) — the "AI agent company":

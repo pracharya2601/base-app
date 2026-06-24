@@ -32,6 +32,7 @@ func RegisterRoutes(se *core.ServeEvent, app core.App) {
 			Description string `json:"description"`
 			Role        string `json:"role"`
 			AgentID     string `json:"agentId"`
+			Kind        string `json:"kind"` // optional: selects an agentic function (e.g. "ops_command")
 		}
 		if err := e.BindBody(&body); err != nil {
 			return e.BadRequestError("invalid request body", err)
@@ -43,7 +44,7 @@ func RegisterRoutes(se *core.ServeEvent, app core.App) {
 		if err != nil {
 			return e.BadRequestError(err.Error(), nil)
 		}
-		task, err := createTask(app, body.Title, body.Description, agent.Id, "", actorID(e))
+		task, err := createTask(app, body.Title, body.Description, agent.Id, "", actorID(e), body.Kind)
 		if err != nil {
 			return e.InternalServerError("failed to create task", err)
 		}

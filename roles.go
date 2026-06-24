@@ -6,6 +6,8 @@ import (
 	"github.com/pocketbase/dbx"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
+
+	"base-app/internal/provision"
 )
 
 // User-facing RBAC enforced entirely by PocketBase's NATIVE per-collection rules
@@ -235,7 +237,7 @@ func applyRbacRulesIfUnset(app core.App, c *core.Collection) {
 	if err != nil {
 		return
 	}
-	applyRules(fresh, rbacRules(fresh.Name))
+	provision.ApplyRules(fresh, provision.RBACRules(fresh.Name))
 	if err := app.Save(fresh); err != nil {
 		app.Logger().Error("rbac: failed to auto-apply rules on create", "collection", fresh.Name, "err", err)
 	}

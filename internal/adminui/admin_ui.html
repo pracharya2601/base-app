@@ -277,6 +277,14 @@
       </div>
 
       <div class="card">
+        <div class="topbar"><h2 style="margin:0">Ops command</h2></div>
+        <p class="sub" style="margin-top:6px">Tell the platform what to do in plain English (e.g. "add a blog_posts collection with title, body, and a relation to authors, rbac on"). The ops agent drafts a schema change and <strong>queues it for your approval</strong> — nothing is applied until you approve it below in Tasks.</p>
+        <div id="opsMsg"></div>
+        <div class="field"><textarea id="opsInput" rows="3" placeholder="Describe the change you want…"></textarea></div>
+        <div class="row"><button id="opsSend">Ask the ops agent</button></div>
+      </div>
+
+      <div class="card">
         <div class="topbar"><h2 style="margin:0">Tasks</h2>
           <div style="display:flex; gap:8px; align-items:center">
             <select id="orchFilter" style="width:auto">
@@ -564,6 +572,21 @@
   }
 
   // ================= ORCHESTRATOR =================
+  async function sendOpsCommand() {
+    const text = $("opsInput").value.trim();
+    if (!text) { msg($("opsMsg"), "Type a request first.", "err"); return; }
+    const title = text.length > 60 ? text.slice(0, 57) + "…" : text;
+    try {
+      await api("/api/orchestrator/tasks", {
+        method: "POST",
+        body: JSON.stringify({ role: "ops", kind: "ops_command", title: title, description: text }),
+      });
+      msg($("opsMsg"), "Queued. The ops agent will draft a schema change and stop for your approval — watch Tasks below (needs_review), then open it to review the proposed change.", "ok");
+      $("opsInput").value = "";
+      loadOrchTasks();
+    } catch (e) { msg($("opsMsg"), "Failed: " + e.message, "err"); }
+  }
+
   async function loadOrchConfig() {
     try {
       const c = await api("/api/orchestrator/config");
@@ -715,6 +738,7 @@
   $("orchStatusRefresh").onclick = loadOrchStatus;
   $("orchCfgRefresh").onclick = loadOrchConfig;
   $("orchCfgSave").onclick = saveOrchConfig;
+  $("opsSend").onclick = sendOpsCommand;
   $("orchTasksRefresh").onclick = loadOrchTasks;
   $("orchFilter").onchange = loadOrchTasks;
 
