@@ -134,6 +134,7 @@
       <a data-view="images"><span class="ico">🖼</span> Images</a>
       <a data-view="keys"><span class="ico">⚿</span> API Keys</a>
       <a data-view="orchestrator"><span class="ico">🤖</span> Orchestrator</a>
+      <a data-view="data"><span class="ico">▦</span> Data</a>
     </nav>
     <div class="sidefoot">
       <div class="who" id="whoami">—</div>
@@ -307,6 +308,23 @@
       <div class="card hidden" id="orchDetail"></div>
     </section>
 
+    <!-- ============ DATA (read-only) ============ -->
+    <section class="section" id="view-data">
+      <h1>Data</h1>
+      <p class="sub">Read-only browse of your collections — so you never need the PocketBase dashboard to look at records. To <em>change</em> data, use the Ops command box (Orchestrator) or the records API.</p>
+      <div class="card">
+        <div class="topbar">
+          <h2 style="margin:0">Records</h2>
+          <div style="display:flex; gap:8px; align-items:center">
+            <select id="dataCollection" style="width:auto"><option value="">choose a collection…</option></select>
+            <button class="ghost" id="dataRefresh">Refresh</button>
+          </div>
+        </div>
+        <div id="dataMsg" style="margin-top:8px"></div>
+        <div id="dataTable" style="margin-top:8px; overflow:auto"></div>
+      </div>
+    </section>
+
   </div></main>
 </div>
 
@@ -374,12 +392,13 @@
   // ---------- sidebar routing ----------
   function route() {
     const view = (location.hash || "#providers").replace("#", "");
-    const valid = ["providers", "images", "keys", "orchestrator"].includes(view) ? view : "providers";
+    const valid = ["providers", "images", "keys", "orchestrator", "data"].includes(view) ? view : "providers";
     document.querySelectorAll(".section").forEach((s) => s.classList.remove("active"));
     $("view-" + valid).classList.add("active");
     document.querySelectorAll(".nav a").forEach((a) => a.classList.toggle("active", a.dataset.view === valid));
     if (valid === "images") loadImages();
     if (valid === "orchestrator") { loadOrchStatus(); loadOrchConfig(); loadOrchTasks(); }
+    if (valid === "data") loadDataCollections();
   }
   document.querySelectorAll(".nav a").forEach((a) => a.addEventListener("click", () => { location.hash = a.dataset.view; }));
   window.addEventListener("hashchange", route);
@@ -587,6 +606,43 @@
     } catch (e) { msg($("opsMsg"), "Failed: " + e.message, "err"); }
   }
 
+  // ---------- Data (read-only browse) ----------
+  let dataCollections = [];
+  async function loadDataCollections() {
+    try {
+      const r = await api("/api/collections?perPage=200");
+      dataCollections = r.items || [];
+      const sel = $("dataCollection"), cur = sel.value;
+      sel.innerHTML = '<option value="">choose a collection…</option>' +
+        dataCollections.map((c) => `<option value="${esc(c.name)}">${esc(c.name)}${c.system ? " (system)" : ""}</option>`).join("");
+      if (cur) sel.value = cur;
+    } catch (e) { msg($("dataMsg"), "Load failed: " + e.message, "err"); }
+  }
+  async function loadDataRecords() {
+    const name = $("dataCollection").value;
+    if (!name) { $("dataTable").innerHTML = ""; msg($("dataMsg"), "", ""); return; }
+    try {
+      const r = await api(`/api/collections/${encodeURIComponent(name)}/records?perPage=50&sort=-created`);
+      const items = r.items || [];
+      const col = dataCollections.find((c) => c.name === name);
+      let cols = ["id"];
+      if (col && col.fields) cols = cols.concat(col.fields.map((f) => f.name).filter((n) => n !== "password" && n !== "tokenKey"));
+      if (!items.length) { $("dataTable").innerHTML = `<p class="sub">No records.</p>`; msg($("dataMsg"), "", ""); return; }
+      const head = cols.map((c) => `<th>${esc(c)}</th>`).join("");
+      const rows = items.map((it) => "<tr>" + cols.map((c) => {
+        let v = it[c];
+        if (v === undefined || v === null) v = "";
+        else if (typeof v === "object") v = JSON.stringify(v);
+        else v = String(v);
+        if (v.length > 80) v = v.slice(0, 77) + "…";
+        return `<td>${esc(v)}</td>`;
+      }).join("") + "</tr>").join("");
+      $("dataTable").innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+      const more = r.totalItems > items.length ? ` (showing first 50 of ${r.totalItems})` : "";
+      msg($("dataMsg"), `${items.length} record(s)${more}`, "ok");
+    } catch (e) { $("dataTable").innerHTML = ""; msg($("dataMsg"), "Load failed: " + e.message, "err"); }
+  }
+
   async function loadOrchConfig() {
     try {
       const c = await api("/api/orchestrator/config");
@@ -740,6 +796,8 @@
   $("orchCfgSave").onclick = saveOrchConfig;
   $("opsSend").onclick = sendOpsCommand;
   $("orchTasksRefresh").onclick = loadOrchTasks;
+  $("dataCollection").onchange = loadDataRecords;
+  $("dataRefresh").onclick = () => { loadDataCollections().then(loadDataRecords); };
   $("orchFilter").onchange = loadOrchTasks;
 
   // ---------- bootstrap: reuse the dashboard (/_/) superuser session ----------

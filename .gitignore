@@ -23,3 +23,6 @@ mcp/pb-mcp
 
 # Claude Code orchestrator runtime state
 .claude/orchestrator/state/
+
+# Frontend deps (the built SPA in internal/adminui/spa IS committed so `go build` works)
+frontend/node_modules/

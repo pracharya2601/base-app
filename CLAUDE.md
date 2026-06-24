@@ -46,7 +46,7 @@ main.go calls. (Note: the root core is `package main` and so CANNOT be imported 
 shared helpers a feature needs must live in the feature pkg or a shared package.)
 
 ROOT (package main) — the platform core:
-main.go              framework entry: OnServe wiring; provision endpoint is now a thin wrapper over internal/provision.Apply (maps spec errors→400, save errors→500); field-type catalog (registerProvisionRoutes)
+main.go              framework entry: OnServe wiring; blockDashboardMiddleware (BLOCK_PB_DASHBOARD=1 → redirect /_/ to /admin so operators only use the unified console; /api/* incl. auth stay open); provision endpoint is now a thin wrapper over internal/provision.Apply (maps spec errors→400, save errors→500); field-type catalog (registerProvisionRoutes)
 
 internal/provision/ (package provision) — the importable core of superadmin provisioning, extracted out of package main so BOTH the HTTP endpoint AND in-process callers (the agentic ops executor) share one implementation. Exports Spec/CollectionSpec/FieldSpec/Rules (with jsonschema tags for tool use), Apply(app, Spec)->Result, ApplyRules, RBACRules, and InvalidSpecError (→400 vs 500). roles.go + apikeys_http_test.go now call provision.ApplyRules/RBACRules.
 
@@ -63,9 +63,12 @@ internal/ai/ (package ai) — the AI proxy feature, self-contained:
   airatelimit_test.go  rate-limiter + env unit tests
 
 internal/adminui/ (package adminui) — the admin console, self-contained:
-  adminui.go         unified /admin console (embeds admin_ui.html); exports RegisterAdmin
-  admin_ui.html      the /admin console page (PocketBase-native palette, auto-login via dashboard session). Tabs: AI Providers, Images, API Keys, Orchestrator (status + Settings panel [DB-driven config] + Ops command box [plain-English → ops agent proposes a schema change for approval] + task queue + draft/lineage/runs detail + proposed-actions panel [pending write-tool side effects, e.g. a refund or schema change, shown loudly before approve] + approve/revise/reject + autopilot toggle, over the GET/POST /api/orchestrator/* endpoints)
-  keysui.go / aiui.go  thin redirects /admin/apikeys, /admin/ai; export RegisterKeys / RegisterAIUI
+  adminui.go         serves the /admin SPA: GET /admin -> spa/index.html, /admin/assets/{path...} -> embedded JS/CSS (apis.Static), /admin/classic -> the old single-file console (fallback). Embeds spa/ (committed build output) + admin_ui.html.
+  spa/               COMMITTED Vite+Svelte build output (from ../frontend). Committed so `go build` works without npm; the Dockerfile rebuilds it fresh (node stage).
+  admin_ui.html      the CLASSIC single-file console (now at /admin/classic) — still hosts AI Providers / Images / API Keys tabs not yet ported to the SPA; hash-routed (#providers/#keys/…).
+  keysui.go / aiui.go  /admin/apikeys, /admin/ai -> redirect to /admin/classic#keys / #providers (where those tabs live until ported)
+
+frontend/ (Vite + Svelte SOURCE for the /admin SPA — NOT package main) — replaces the hand-maintained HTML string. `cd frontend && npm install && npm run build` outputs to internal/adminui/spa (vite base=/admin/). Native look via theme.css (PocketBase design tokens, copied from admin_ui.html). Views ported so far: Orchestrator (status + autopilot toggle + Ops command box + task queue + detail with proposed-actions + approve/revise/reject) and Data (read-only collection/records browse). AI Providers/Images/API Keys/Settings still live in the classic console (linked from the SPA nav). lib/api.js = fetch wrapper + superuser login (token in sessionStorage). After editing frontend/, rebuild + commit spa/.
 
 internal/orchestrator/ (package orchestrator) — the "AI agent company":
   schema.go          _agents/_tasks/_runs system collections (+ owner field for multi-tenancy; _tasks.kind for action dispatch) + _orchConfigs (per-tenant config overrides, owner-keyed) + _proposedActions (write-tool side effects awaiting approval) + SeedTeam/SeedTeamForOwner (PM/engineer/reviewer; per-tenant idempotent) + SeedAgent. Multi-tenancy slice 1 = data model only; tick still global (owner="" = legacy/system tenant)

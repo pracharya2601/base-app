@@ -6,11 +6,11 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 )
 
-// The standalone AI-provider admin page has been folded into the unified console
-// (admin_ui.html, served at GET /admin). This route is kept only to redirect the
-// old URL into the console's AI-providers section, so existing links work.
+// AI-provider management currently lives in the classic console (/admin/classic);
+// the new SPA at /admin doesn't host it yet. This route redirects the old URL (and
+// the SPA's "AI Providers" link) to the classic console's providers section.
 func RegisterAIUI(se *core.ServeEvent) {
 	se.Router.GET("/admin/ai", func(e *core.RequestEvent) error {
-		return e.Redirect(http.StatusFound, "/admin#providers")
+		return e.Redirect(http.StatusFound, "/admin/classic#providers")
 	})
 }

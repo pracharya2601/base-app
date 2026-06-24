@@ -1,6 +1,15 @@
 # PocketBase (framework mode) + Litestream, in one image.
 # Litestream supervises PocketBase so it can restore-on-boot and stream the WAL.
 
+# ---- frontend stage: build the Svelte admin SPA (served at /admin) ----
+FROM node:22-alpine AS frontend
+WORKDIR /fe
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
+COPY frontend/ ./
+# Output straight to /spa; the Go stage embeds it into internal/adminui/spa.
+RUN npm run build -- --outDir /spa --emptyOutDir
+
 # ---- build stage: compile our custom PocketBase from main.go ----
 FROM golang:1.25-alpine AS build
 RUN apk add --no-cache git
@@ -8,6 +17,8 @@ WORKDIR /src
 COPY go.mod go.sum ./
 COPY *.go ./
 COPY internal/ ./internal/
+# Overwrite the committed SPA build with a fresh one from the frontend stage.
+COPY --from=frontend /spa ./internal/adminui/spa
 RUN go mod tidy
 RUN CGO_ENABLED=0 go build -trimpath -o /pb/pocketbase .
 
