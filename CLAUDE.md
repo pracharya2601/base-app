@@ -74,7 +74,7 @@ scripts/mint-apikey.sh  mint a scoped, revocable API key for a service client (e
 mcp/main.go          MCP server: 9 tools (incl. agentic RBAC: list_roles, manage_role, assign_user_roles)
 .mcp.json            project-scoped MCP config (Claude Code / Desktop)
 pocketbase-types.ts  generated frontend types (regenerate after schema changes)
-test-superadmin-api.sh  raw-curl walkthrough of the superuser API
+scripts/test-superadmin-api.sh  raw-curl walkthrough of the superuser API
 pb_hooks/main.pb.js  (unused in framework mode — JSVM plugin not registered)
 ```
 

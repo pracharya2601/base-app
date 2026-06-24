@@ -53,7 +53,7 @@ docker compose up -d --build    # start pocketbase (+litestream)
 Drive it from the API (no UI needed):
 
 ```bash
-./test-superadmin-api.sh        # auth → create a collection → insert → read → set appName
+./scripts/test-superadmin-api.sh   # auth → create a collection → insert → read → set appName
 ```
 
 Regenerate frontend types after any schema change:
